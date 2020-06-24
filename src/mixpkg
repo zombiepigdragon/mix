@@ -1,0 +1,148 @@
+#!/usr/bin/bash
+# Make the environment programmer friendly
+set -o errexit -o pipefail -o noclobber -o nounset
+
+function version() {
+echo "mixpkg - 0.0.0"
+}
+
+function usage() {
+version
+cat << EOF
+mixpkg is not meant to be run by end users. Instead, use mix.
+mix will call mixpkg anytime it's needed. If mixpkg has to be called manually for any reason, it's a bug.
+Continue only if you have a legitimate reason to be using mixpkg manually.
+
+OPTIONS:
+-h,--help: Show this message
+-V,--version: Show the mix/mixpkg version being run
+-p: The filename of the pkgbuild
+-s: The srcdir
+-d: The pkgdir
+--dump: Output all of the information provided in the pkgbuild in a parseable format
+--build: Build the pkgbuild
+--check: Check the pkgbuild
+--package: Run the package step of the pkgbuild
+EOF
+}
+
+# Arguments:
+# $1: The pkgbuild filepath
+# $2: srcdir
+# $3: pkgdir
+# $4: startdir
+function import_pkgbuild() {
+srcdir="$2"
+pkgdir="$3"
+startdir="$4"
+source "$1"
+}
+
+# Arguments:
+# $1: The pkgbuild filepath
+# $2: srcdir
+# $3: pkgdir
+# $4: startdir
+# ALL PATHS MUST BE ABSOLUTE!
+function build_pkgbuild() {
+import_pkgbuild "$1" "$2" "$3" "$4"
+# TODO: Get source
+cd "$2"
+mkdir -p "$pkgname-$pkgver" # TODO: Workaround for not having source at this step, guesses at dir name
+declare -F prepare >/dev/null && prepare
+cd "$2"
+declare -F build >/dev/null && build || $(echo 'Missing build step.' >&2 && exit 1)
+cd "$2"
+declare -F check >/dev/null && check
+cd "$3"
+fakeroot -- $MIXPKG --package -p"$1" -s"$2" -d"$3"
+}
+
+# Arguments:
+# $1: The pkgbuild filepath
+# $2: srcdir
+# $3: pkgdir
+# $4: startdir
+# ALL PATHS MUST BE ABSOLUTE!
+function package_pkgbuild() {
+import_pkgbuild "$1" "$2" "$3" "$4"
+mkdir -p "$pkgname-$pkgver" # TODO: Workaround for not having source at this step, guesses at dir name
+declare -F package >/dev/null && package || $(echo 'Missing package step.' >&2 && exit 1)
+}
+
+function main() {
+# Processes arguments with getopt (enhanced)
+TEMP=$(getopt -o 'hVp:s:d:' --long 'help,version,package' -n 'mixpkg' -- "$@")
+[ $? -ne 0 ] && echo "Exiting" && exit 1
+eval set -- "$TEMP"
+unset TEMP
+
+# Variables determining which option to use
+HELP=0
+VERSION=0
+PACKAGE=0
+PKGBUILD='PKGBUILD'
+SRCDIR=""
+PKGDIR=""
+MIXPKG="$(realpath ${BASH_SOURCE[0]})"
+
+# The argument reading loop
+# Sets the variables according to the arguments
+while true; do
+case "$1" in
+'-h'|'--help')
+HELP=1
+shift
+continue
+;;
+'-V'|'--version')
+VERSION=1
+shift
+continue
+;;
+'--package')
+PACKAGE=1
+shift
+continue
+;;
+'-p')
+PKGBUILD="$2"
+shift 2
+continue
+;;
+'-s')
+SRCDIR="$2"
+shift 2
+continue
+;;
+'-d')
+PKGDIR="$2"
+shift 2
+continue
+;;
+'--')
+shift
+break
+;;
+*)
+echo "Internal error parsing arguments!" >&2
+exit 1
+;;
+esac
+done
+
+[ $HELP -ne 0 ] && usage && exit 0
+[ $VERSION -ne 0 ] && version && exit 0
+[ -z "$PKGBUILD" ] && usage && exit 1
+[ -z "$SRCDIR" ] && usage && exit 1
+[ -z "$PKGDIR" ] && usage && exit 1
+[ "$PACKAGE" -ne 0 ] && package_pkgbuild "$(realpath $PKGBUILD)" "$(realpath $SRCDIR)" "$(realpath $PKGDIR)" "$(realpath `dirname $PKGBUILD`)" && exit 0
+build_pkgbuild "$(realpath $PKGBUILD)" "$(realpath $SRCDIR)" "$(realpath $PKGDIR)" "$(realpath `dirname $PKGBUILD`)"
+exit 0
+}
+
+# The beginning of the application
+# Quick checks and initing
+[[ `getopt --test; echo $?` -ne 4 ]] && echo "getopt is not enhanced version, couldn't parse arguments." && exit 1
+#set -x
+main "$@"
