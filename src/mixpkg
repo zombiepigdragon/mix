@@ -13,16 +13,21 @@ mixpkg is not meant to be run by end users. Instead, use mix.
 mix will call mixpkg anytime it's needed. If mixpkg has to be called manually for any reason, it's a bug.
 Continue only if you have a legitimate reason to be using mixpkg manually.
 
+USAGE: mixpkg [-hV]
+       mixpkg action -ppkgbuild -ssrcdir -dpkgdir
+
 OPTIONS:
 -h,--help: Show this message
 -V,--version: Show the mix/mixpkg version being run
 -p: The filename of the pkgbuild
 -s: The srcdir
 -d: The pkgdir
---dump: Output all of the information provided in the pkgbuild in a parseable format
---build: Build the pkgbuild
---check: Check the pkgbuild
---package: Run the package step of the pkgbuild
+
+ACTIONS:
+dump: Output all of the information provided in the pkgbuild in a parseable format
+compile: Build the pkgbuild and then package it
+build: Build the pkgbuild
+package: Run the package step of the pkgbuild
 EOF
 }
 
@@ -54,8 +59,6 @@ cd "$2"
 declare -F build >/dev/null && build || $(echo 'Missing build step.' >&2 && exit 1)
 cd "$2"
 declare -F check >/dev/null && check
-cd "$3"
-fakeroot -- $MIXPKG --package -p"$1" -s"$2" -d"$3"
 }
 
 # Arguments:
@@ -70,17 +73,26 @@ mkdir -p "$pkgname-$pkgver" # TODO: Workaround for not having source at this ste
 declare -F package >/dev/null && package || $(echo 'Missing package step.' >&2 && exit 1)
 }
 
+# Arguments:
+# $1: The pkgbuild filepath
+# $2: srcdir
+# $3: pkgdir
+# $4: startdir
+# ALL PATHS MUST BE ABSOLUTE!
+function compile_pkgbuild() {
+build_pkgbuild "$1" "$2" "$3" "$4"
+fakeroot -- $MIXPKG package -p"$1" -s"$2" -d"$3"
+}
+
 function main() {
 # Processes arguments with getopt (enhanced)
-TEMP=$(getopt -o 'hVp:s:d:' --long 'help,version,package' -n 'mixpkg' -- "$@")
+TEMP=$(getopt -o 'hVp:s:d:' --long 'help,version' -n 'mixpkg' -- "$@")
 [ $? -ne 0 ] && echo "Exiting" && exit 1
 eval set -- "$TEMP"
 unset TEMP
 
 # Variables determining which option to use
-HELP=0
-VERSION=0
-PACKAGE=0
+ACTION=""
 PKGBUILD='PKGBUILD'
 SRCDIR=""
 PKGDIR=""
@@ -91,32 +103,27 @@ MIXPKG="$(realpath ${BASH_SOURCE[0]})"
 while true; do
 case "$1" in
 '-h'|'--help')
-HELP=1
+ACTION='HELP'
 shift
 continue
 ;;
 '-V'|'--version')
-VERSION=1
-shift
-continue
-;;
-'--package')
-PACKAGE=1
+ACTION='VERSION'
 shift
 continue
 ;;
 '-p')
-PKGBUILD="$2"
+PKGBUILD="$(realpath $2)"
 shift 2
 continue
 ;;
 '-s')
-SRCDIR="$2"
+SRCDIR="$(realpath $2)"
 shift 2
 continue
 ;;
 '-d')
-PKGDIR="$2"
+PKGDIR="$(realpath $2)"
 shift 2
 continue
 ;;
@@ -131,14 +138,19 @@ exit 1
 esac
 done
 
-[ $HELP -ne 0 ] && usage && exit 0
-[ $VERSION -ne 0 ] && version && exit 0
+[ "$ACTION" == 'HELP' ] && usage && exit 0
+[ "$ACTION" == 'VERSION' ] && version && exit 0
+
+[ "$#" -ne 1 ] && echo "Only use one action" >&2 && exit 1
+ACTION="$(echo -nE $1 | tr a-z A-Z)"
+
 [ -z "$PKGBUILD" ] && usage && exit 1
 [ -z "$SRCDIR" ] && usage && exit 1
 [ -z "$PKGDIR" ] && usage && exit 1
-[ "$PACKAGE" -ne 0 ] && package_pkgbuild "$(realpath $PKGBUILD)" "$(realpath $SRCDIR)" "$(realpath $PKGDIR)" "$(realpath `dirname $PKGBUILD`)" && exit 0
-build_pkgbuild "$(realpath $PKGBUILD)" "$(realpath $SRCDIR)" "$(realpath $PKGDIR)" "$(realpath `dirname $PKGBUILD`)"
-exit 0
+[ "$ACTION" == 'COMPILE' ] && compile_pkgbuild "$PKGBUILD" "$SRCDIR" "$PKGDIR" "$(realpath `dirname $PKGBUILD`)" && exit 0 
+[ "$ACTION" == 'BUILD' ] && build_pkgbuild "$PKGBUILD" "$SRCDIR" "$PKGDIR" "$(realpath `dirname $PKGBUILD`)" && exit 0 
+[ "$ACTION" == 'PACKAGE' ] && package_pkgbuild "$PKGBUILD" "$SRCDIR" "$PKGDIR" "$(realpath `dirname $PKGBUILD`)" && exit 0 
+echo "Unrecognized action $ACTION" >&2 && exit 1
 }
 
 # The beginning of the application
