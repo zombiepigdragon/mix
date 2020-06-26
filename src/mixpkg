@@ -2,8 +2,14 @@
 # Make the environment programmer friendly
 set -o errexit -o pipefail -o noclobber -o nounset
 
+PKGBUILD='PKGBUILD'
+SRCDIR=""
+PKGDIR=""
+MIXPKG="$(realpath ${BASH_SOURCE[0]})"
+
 function version() {
 echo "mixpkg - 0.0.0"
+echo "Created by Lemix Team <lemixproject@gmail.com>"
 }
 
 function usage() {
@@ -31,57 +37,56 @@ package: Run the package step of the pkgbuild
 EOF
 }
 
-# Arguments:
-# $1: The pkgbuild filepath
-# $2: srcdir
-# $3: pkgdir
-# $4: startdir
 function import_pkgbuild() {
-srcdir="$2"
-pkgdir="$3"
-startdir="$4"
-source "$1"
+srcdir="$SRCDIR"
+pkgdir="$PKGDIR"
+startdir="$(dirname $MIXPKG)"
+# Defaults for when nothing's defined
+pkgver='?'
+pkgrel=1
+epoch=0
+url=""
+source "$PKGBUILD"
 }
 
-# Arguments:
-# $1: The pkgbuild filepath
-# $2: srcdir
-# $3: pkgdir
-# $4: startdir
-# ALL PATHS MUST BE ABSOLUTE!
 function build_pkgbuild() {
-import_pkgbuild "$1" "$2" "$3" "$4"
-# TODO: Get source
-cd "$2"
-mkdir -p "$pkgname-$pkgver" # TODO: Workaround for not having source at this step, guesses at dir name
+import_pkgbuild
+cd "$SRCDIR"
 declare -F prepare >/dev/null && prepare
-cd "$2"
+cd "$SRCDIR"
 declare -F build >/dev/null && build || $(echo 'Missing build step.' >&2 && exit 1)
-cd "$2"
+cd "$SRCDIR"
 declare -F check >/dev/null && check
 }
 
-# Arguments:
-# $1: The pkgbuild filepath
-# $2: srcdir
-# $3: pkgdir
-# $4: startdir
-# ALL PATHS MUST BE ABSOLUTE!
 function package_pkgbuild() {
-import_pkgbuild "$1" "$2" "$3" "$4"
-mkdir -p "$pkgname-$pkgver" # TODO: Workaround for not having source at this step, guesses at dir name
+import_pkgbuild
 declare -F package >/dev/null && package || $(echo 'Missing package step.' >&2 && exit 1)
 }
 
-# Arguments:
-# $1: The pkgbuild filepath
-# $2: srcdir
-# $3: pkgdir
-# $4: startdir
-# ALL PATHS MUST BE ABSOLUTE!
 function compile_pkgbuild() {
-build_pkgbuild "$1" "$2" "$3" "$4"
-fakeroot -- $MIXPKG package -p"$1" -s"$2" -d"$3"
+download_pkgbuild_files
+build_pkgbuild
+fakeroot -- $MIXPKG package -p"$PKGBUILD" -s"$SRCDIR" -d"$PKGDIR"
+}
+
+function dump_pkgbuild() {
+import_pkgbuild
+printf '%q\t%s\t%q\t%d\t%s\t%s\ttemp:%q' "${pkgname[*]}" "$pkgver" "$pkgrel" "$epoch" "$pkgdesc" "$url" "${arch[*]}"
+}
+
+# Arguments are urls or filenames
+function download_pkgbuild_files() {
+import_pkgbuild
+for source_file in "$source"; do
+# TODO: Allow for files with rename syntax
+local result_file="$SRCDIR/$source_file"
+# TODO: Not all files will be online, check for local files first
+curl "$source_file" -o "$result_file"
+# TODO: Check $no_extract
+bsdtar -tf "$result_file" && bsdtar -xf "$result_file"
+done
+# TODO: Check for a .sig and check it
 }
 
 function main() {
@@ -92,11 +97,7 @@ eval set -- "$TEMP"
 unset TEMP
 
 # Variables determining which option to use
-ACTION=""
-PKGBUILD='PKGBUILD'
-SRCDIR=""
-PKGDIR=""
-MIXPKG="$(realpath ${BASH_SOURCE[0]})"
+local ACTION=""
 
 # The argument reading loop
 # Sets the variables according to the arguments
@@ -105,12 +106,12 @@ case "$1" in
 '-h'|'--help')
 ACTION='HELP'
 shift
-continue
+break
 ;;
 '-V'|'--version')
 ACTION='VERSION'
 shift
-continue
+break
 ;;
 '-p')
 PKGBUILD="$(realpath $2)"
@@ -140,16 +141,18 @@ done
 
 [ "$ACTION" == 'HELP' ] && usage && exit 0
 [ "$ACTION" == 'VERSION' ] && version && exit 0
+[ "$ACTION" == 'DOWNLOAD' ] && get_pkgbuild_files && exit 0
 
-[ "$#" -ne 1 ] && echo "Only use one action" >&2 && exit 1
+[ "$#" -ne 1 ] && echo "Exactly one valid action is required." >&2 && exit 1
 ACTION="$(echo -nE $1 | tr a-z A-Z)"
 
 [ -z "$PKGBUILD" ] && usage && exit 1
 [ -z "$SRCDIR" ] && usage && exit 1
 [ -z "$PKGDIR" ] && usage && exit 1
-[ "$ACTION" == 'COMPILE' ] && compile_pkgbuild "$PKGBUILD" "$SRCDIR" "$PKGDIR" "$(realpath `dirname $PKGBUILD`)" && exit 0 
-[ "$ACTION" == 'BUILD' ] && build_pkgbuild "$PKGBUILD" "$SRCDIR" "$PKGDIR" "$(realpath `dirname $PKGBUILD`)" && exit 0 
-[ "$ACTION" == 'PACKAGE' ] && package_pkgbuild "$PKGBUILD" "$SRCDIR" "$PKGDIR" "$(realpath `dirname $PKGBUILD`)" && exit 0 
+[ "$ACTION" == 'DUMP' ] && dump_pkgbuild && exit 0 
+[ "$ACTION" == 'COMPILE' ] && compile_pkgbuild && exit 0 
+[ "$ACTION" == 'BUILD' ] && build_pkgbuild && exit 0 
+[ "$ACTION" == 'PACKAGE' ] && package_pkgbuild && exit 0 
 echo "Unrecognized action $ACTION" >&2 && exit 1
 }
 
