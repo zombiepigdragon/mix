@@ -8,13 +8,13 @@ PKGDIR=""
 MIXPKG="$(realpath ${BASH_SOURCE[0]})"
 
 function version() {
-echo "mixpkg - 0.0.0"
-echo "Created by Lemix Team <lemixproject@gmail.com>"
+	echo "mixpkg - 0.0.0"
+	echo "Created by Lemix Team <lemixproject@gmail.com>"
 }
 
 function usage() {
-version
-cat << EOF
+	version
+	cat << EOF
 mixpkg is not meant to be run by end users. Instead, use mix.
 mix will call mixpkg anytime it's needed. If mixpkg has to be called manually for any reason, it's a bug.
 Continue only if you have a legitimate reason to be using mixpkg manually.
@@ -38,63 +38,63 @@ EOF
 }
 
 function import_pkgbuild() {
-srcdir="$SRCDIR"
-pkgdir="$PKGDIR"
-startdir="$(dirname $MIXPKG)"
-# Defaults for when nothing's defined
-pkgver='?'
-pkgrel=1
-epoch=0
-url=""
-source "$PKGBUILD"
+	srcdir="$SRCDIR"
+	pkgdir="$PKGDIR"
+	startdir="$(dirname $MIXPKG)"
+	# Defaults for when nothing's defined
+	pkgver='?'
+	pkgrel=1
+	epoch=0
+	url=""
+	source "$PKGBUILD"
 }
 
 function build_pkgbuild() {
-import_pkgbuild
-cd "$SRCDIR"
-declare -F prepare >/dev/null && prepare
-cd "$SRCDIR"
-declare -F build >/dev/null && build || $(echo 'Missing build step.' >&2 && exit 1)
-cd "$SRCDIR"
-declare -F check >/dev/null && check
+	import_pkgbuild
+	cd "$SRCDIR"
+	declare -F prepare >/dev/null && prepare
+	cd "$SRCDIR"
+	declare -F build >/dev/null && build || $(echo 'Missing build step.' >&2 && exit 1)
+	cd "$SRCDIR"
+	declare -F check >/dev/null && check
 }
 
 function package_pkgbuild() {
-import_pkgbuild
-declare -F package >/dev/null && package || $(echo 'Missing package step.' >&2 && exit 1)
+	import_pkgbuild
+	declare -F package >/dev/null && package || $(echo 'Missing package step.' >&2 && exit 1)
 }
 
 function compile_pkgbuild() {
-download_pkgbuild_files
-build_pkgbuild
-fakeroot -- $MIXPKG package -p"$PKGBUILD" -s"$SRCDIR" -d"$PKGDIR"
+	download_pkgbuild_files
+	build_pkgbuild
+	fakeroot -- $MIXPKG package -p"$PKGBUILD" -s"$SRCDIR" -d"$PKGDIR"
 }
 
 function dump_pkgbuild() {
-import_pkgbuild
-printf '%q\t%s\t%q\t%d\t%s\t%s\ttemp:%q' "${pkgname[*]}" "$pkgver" "$pkgrel" "$epoch" "$pkgdesc" "$url" "${arch[*]}"
+	import_pkgbuild
+	printf '%q\t%s\t%q\t%d\t%s\t%s\ttemp:%q' "${pkgname[*]}" "$pkgver" "$pkgrel" "$epoch" "$pkgdesc" "$url" "${arch[*]}"
 }
 
 # Arguments are urls or filenames
 function download_pkgbuild_files() {
-import_pkgbuild
-for source_file in "$source"; do
-# TODO: Allow for files with rename syntax
-local result_file="$SRCDIR/$source_file"
-# TODO: Not all files will be online, check for local files first
-curl "$source_file" -o "$result_file"
-# TODO: Check $no_extract
-bsdtar -tf "$result_file" && bsdtar -xf "$result_file"
-done
-# TODO: Check for a .sig and check it
+	import_pkgbuild
+	for source_file in "$source"; do
+		# TODO: Allow for files with rename syntax
+		local result_file="$SRCDIR/$source_file"
+		# TODO: Not all files will be online, check for local files first
+		curl "$source_file" -o "$result_file"
+		# TODO: Check $no_extract
+		bsdtar -tf "$result_file" && bsdtar -xf "$result_file"
+	done
+	# TODO: Check for a .sig and check it
 }
 
 function main() {
-# Processes arguments with getopt (enhanced)
-TEMP=$(getopt -o 'hVp:s:d:' --long 'help,version' -n 'mixpkg' -- "$@")
-[ $? -ne 0 ] && echo "Exiting" && exit 1
-eval set -- "$TEMP"
-unset TEMP
+	# Processes arguments with getopt (enhanced)
+	TEMP=$(getopt -o 'hVp:s:d:' --long 'help,version' -n 'mixpkg' -- "$@")
+	[ $? -ne 0 ] && echo "Exiting" && exit 1
+	eval set -- "$TEMP"
+	unset TEMP
 
 # Variables determining which option to use
 local ACTION=""
@@ -102,41 +102,41 @@ local ACTION=""
 # The argument reading loop
 # Sets the variables according to the arguments
 while true; do
-case "$1" in
-'-h'|'--help')
-ACTION='HELP'
-shift
-break
-;;
-'-V'|'--version')
-ACTION='VERSION'
-shift
-break
-;;
-'-p')
-PKGBUILD="$(realpath $2)"
-shift 2
-continue
-;;
-'-s')
-SRCDIR="$(realpath $2)"
-shift 2
-continue
-;;
-'-d')
-PKGDIR="$(realpath $2)"
-shift 2
-continue
-;;
-'--')
-shift
-break
-;;
-*)
-echo "Internal error parsing arguments!" >&2
-exit 1
-;;
-esac
+	case "$1" in
+		'-h'|'--help')
+			ACTION='HELP'
+			shift
+			break
+			;;
+		'-V'|'--version')
+			ACTION='VERSION'
+			shift
+			break
+			;;
+		'-p')
+			PKGBUILD="$(realpath $2)"
+			shift 2
+			continue
+			;;
+		'-s')
+			SRCDIR="$(realpath $2)"
+			shift 2
+			continue
+			;;
+		'-d')
+			PKGDIR="$(realpath $2)"
+			shift 2
+			continue
+			;;
+		'--')
+			shift
+			break
+			;;
+		*)
+			echo "Internal error parsing arguments!" >&2
+			exit 1
+			;;
+	esac
 done
 
 [ "$ACTION" == 'HELP' ] && usage && exit 0
