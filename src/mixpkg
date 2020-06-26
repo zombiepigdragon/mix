@@ -5,7 +5,7 @@ set -o errexit -o pipefail -o noclobber -o nounset
 PKGBUILD='PKGBUILD'
 SRCDIR=""
 PKGDIR=""
-MIXPKG="$(realpath ${BASH_SOURCE[0]})"
+MIXPKG="$(realpath "${BASH_SOURCE[0]}")"
 
 function version() {
 	echo "mixpkg - 0.0.0"
@@ -38,14 +38,21 @@ EOF
 }
 
 function import_pkgbuild() {
-	srcdir="$SRCDIR"
-	pkgdir="$PKGDIR"
-	startdir="$(dirname $MIXPKG)"
+	export srcdir="$SRCDIR"
+	export pkgdir="$PKGDIR"
+	startdir="$(dirname "$MIXPKG")"
+	export startdir # Seperate line to allow set -e
 	# Defaults for when nothing's defined
+	pkgname='?'
+	pkgdesc=''
 	pkgver='?'
 	pkgrel=1
-	epoch=0
+	arch=()
+	source=()
+	epoch=0;
 	url=""
+	# Disable lint for undefined source
+	# shellcheck source=/dev/null
 	source "$PKGBUILD"
 }
 
@@ -54,31 +61,41 @@ function build_pkgbuild() {
 	cd "$SRCDIR"
 	declare -F prepare >/dev/null && prepare
 	cd "$SRCDIR"
-	declare -F build >/dev/null && build || $(echo 'Missing build step.' >&2 && exit 1)
+	if ! declare -F build /dev/null; then
+		build
+	else
+		echo 'Missing build step' >&2
+		exit 1
+	fi
 	cd "$SRCDIR"
 	declare -F check >/dev/null && check
 }
 
 function package_pkgbuild() {
 	import_pkgbuild
-	declare -F package >/dev/null && package || $(echo 'Missing package step.' >&2 && exit 1)
+	if ! declare -F package /dev/null; then
+		build
+	else
+		echo 'Missing package step' >&2
+		exit 1
+	fi
 }
 
 function compile_pkgbuild() {
 	download_pkgbuild_files
 	build_pkgbuild
-	fakeroot -- $MIXPKG package -p"$PKGBUILD" -s"$SRCDIR" -d"$PKGDIR"
+	fakeroot -- "$MIXPKG" package -p"$PKGBUILD" -s"$SRCDIR" -d"$PKGDIR"
 }
 
 function dump_pkgbuild() {
 	import_pkgbuild
-	printf '%q\t%s\t%q\t%d\t%s\t%s\ttemp:%q' "${pkgname[*]}" "$pkgver" "$pkgrel" "$epoch" "$pkgdesc" "$url" "${arch[*]}"
+	printf '%q\t%s\t%q\t%d\t%s\t%s\t%q' "${pkgname[*]}" "$pkgver" "$pkgrel" "$epoch" "$pkgdesc" "$url" "${arch[*]}"
 }
 
 # Arguments are urls or filenames
 function download_pkgbuild_files() {
 	import_pkgbuild
-	for source_file in "$source"; do
+	for source_file in ${source[*]}; do
 		# TODO: Allow for files with rename syntax
 		local result_file="$SRCDIR/$source_file"
 		# TODO: Not all files will be online, check for local files first
@@ -114,17 +131,17 @@ while true; do
 			break
 			;;
 		'-p')
-			PKGBUILD="$(realpath $2)"
+			PKGBUILD="$(realpath "$2")"
 			shift 2
 			continue
 			;;
 		'-s')
-			SRCDIR="$(realpath $2)"
+			SRCDIR="$(realpath "$2")"
 			shift 2
 			continue
 			;;
 		'-d')
-			PKGDIR="$(realpath $2)"
+			PKGDIR="$(realpath "$2")"
 			shift 2
 			continue
 			;;
@@ -144,7 +161,7 @@ done
 [ "$ACTION" == 'DOWNLOAD' ] && get_pkgbuild_files && exit 0
 
 [ "$#" -ne 1 ] && echo "Exactly one valid action is required." >&2 && exit 1
-ACTION="$(echo -nE $1 | tr a-z A-Z)"
+ACTION="$(echo -nE "$1" | tr '[:lower:]' '[:upper:]')"
 
 [ -z "$PKGBUILD" ] && usage && exit 1
 [ -z "$SRCDIR" ] && usage && exit 1
@@ -158,6 +175,6 @@ echo "Unrecognized action $ACTION" >&2 && exit 1
 
 # The beginning of the application
 # Quick checks and initing
-[[ `getopt --test; echo $?` -ne 4 ]] && echo "getopt is not enhanced version, couldn't parse arguments." && exit 1
+[[ $(getopt --test; echo $?) -ne 4 ]] && echo "getopt is not enhanced version, couldn't parse arguments." && exit 1
 #set -x
 main "$@"
