@@ -37,23 +37,46 @@ package: Run the package step of the pkgbuild
 EOF
 }
 
+# This function also validates settings from the pkgbuild
 function import_pkgbuild() {
 	export srcdir="$SRCDIR"
 	export pkgdir="$PKGDIR"
 	startdir="$(dirname "$MIXPKG")"
 	export startdir # Seperate line to allow set -e
 	# Defaults for when nothing's defined
-	pkgname='?'
-	pkgdesc=''
-	pkgver='?'
-	pkgrel=1
-	arch=()
-	source=()
+	pkgname=''
+	pkgver=''
+	pkgrel=''
 	epoch=0;
+	pkgdesc=''
 	url=""
+	declare -a license=()
+	install=''
+	changelog=''
+	declare -a source=()
+	declare -a validpgpkeys=()
+	declare -a noextract=()
+	declare -a md5sums=()
+	declare -a sha1sums=() sha224sums=() sha256sums=() sha384sums=() sha512sums=() b2sums=()
+	declare -a groups=()
+	declare -a arch=()
+	declare -a backup=()
+	declare -a depends=()
+	declare -a makedepends=()
+	declare -a checkdepends=()
+	declare -a optdepends=()
+	declare -a conflicts=()
+	declare -a provides=()
+	declare -a replaces=()
+	declare -a options=()
 	# Disable lint for undefined source
 	# shellcheck source=/dev/null
 	source "$PKGBUILD"
+	[ -z "$pkgname" ] && echo "No pkgname found." >&2 && exit 1
+	[ -z "$pkgver" ] && echo "No pkgver found." >&2 && exit 1
+	[ -z "$pkgrel" ] && echo "No pkgrel found." >&2 && exit 1
+	[[ "$pkgrel" =~ ^[0-9]+$ ]] || { echo "pkgrel must be an integer." >&2; exit 1; }
+	[ "${#arch[@]}" -eq 0 ] && echo "No architectures defined." >&2 && exit 1
 }
 
 function build_pkgbuild() {
