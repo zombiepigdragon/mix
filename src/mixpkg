@@ -80,11 +80,10 @@ function import_pkgbuild() {
 	[ -z "$pkgver" ] && echo "No pkgver found." >&2 && exit 1
 	[ -z "$pkgrel" ] && echo "No pkgrel found." >&2 && exit 1
 	[[ "$pkgrel" =~ ^[0-9]+$ ]] || { echo "pkgrel must be an integer." >&2; exit 1; }
-	[ "${#arch[@]}" -eq 0 ] && echo "No architectures defined." >&2 && exit 1
+	[ "${#arch[@]}" -ne 0 ] || { echo "No architectures defined." >&2; exit 1; }
 }
 
 function build_pkgbuild() {
-	import_pkgbuild
 	cd "$SRCDIR"
 	declare -F prepare >/dev/null && prepare
 	cd "$SRCDIR"
@@ -99,7 +98,6 @@ function build_pkgbuild() {
 }
 
 function package_pkgbuild() {
-	import_pkgbuild
 	if ! declare -F package /dev/null; then
 		build
 	else
@@ -115,12 +113,10 @@ function compile_pkgbuild() {
 }
 
 function dump_pkgbuild() {
-	import_pkgbuild
 	printf '%q\t%s\t%q\t%d\t%s\t%s\t%q' "${pkgname[*]}" "$pkgver" "$pkgrel" "$epoch" "$pkgdesc" "$url" "${arch[*]}"
 }
 
 function download_pkgbuild_files() {
-	import_pkgbuild
 	local urlregex
 	readonly urlregex='^(https?|ftp|file)://[-A-Za-z0-9\+&@#/%?=~_|!:,.;]*[-A-Za-z0-9\+&@#/%=~_|]\.[-A-Za-z0-9\+&@#/%?=~_|!:,.;]*[-A-Za-z0-9\+&@#/%=~_|]$'
 	for i in "${!source[@]}"; do
@@ -162,79 +158,101 @@ function download_pkgbuild_files() {
 
 function main() {
 	# Processes arguments with getopt (enhanced)
-	TEMP=$(getopt -o 'hVp:s:d:' --long 'help,version,nogpg' -n 'mixpkg' -- "$@")
-	[ $? -ne 0 ] && echo "Exiting" && exit 1
+	local TEMP
+	TEMP="$(getopt -o 'hVp:s:d:' --long 'help,version,nogpg' -n 'mixpkg' -- "$@")"
 	eval set -- "$TEMP"
 	unset TEMP
 
-# Variables determining which option to use
-local ACTION=""
+	local ACTION=''
 
-# The argument reading loop
-# Sets the variables according to the arguments
-while true; do
-	case "$1" in
-		'-h'|'--help')
-			ACTION='HELP'
-			shift
-			break
+	# The argument reading loop
+	# Sets the variables according to the arguments
+	while true; do
+		case "$1" in
+			'-h'|'--help')
+				ACTION='HELP'
+				shift
+				break
+				;;
+			'-V'|'--version')
+				ACTION='VERSION'
+				shift
+				break
+				;;
+			'-p')
+				PKGBUILD="$(realpath "$2")"
+				shift 2
+				continue
+				;;
+			'-s')
+				SRCDIR="$(realpath "$2")"
+				shift 2
+				continue
+				;;
+			'-d')
+				PKGDIR="$(realpath "$2")"
+				shift 2
+				continue
+				;;
+			'--nogpg')
+				NOGPG="true"
+				shift
+				continue
+				;;
+			'--')
+				shift
+				break
+				;;
+			*)
+				echo "Internal error parsing arguments!" >&2
+				exit 1
+				;;
+		esac
+	done
+
+	case "$ACTION" in
+		'HELP')
+			usage
+			exit 0
 			;;
-		'-V'|'--version')
-			ACTION='VERSION'
-			shift
-			break
-			;;
-		'-p')
-			PKGBUILD="$(realpath "$2")"
-			shift 2
-			continue
-			;;
-		'-s')
-			SRCDIR="$(realpath "$2")"
-			shift 2
-			continue
-			;;
-		'-d')
-			PKGDIR="$(realpath "$2")"
-			shift 2
-			continue
-			;;
-		'--nogpg')
-			NOGPG="true"
-			shift
-			continue
-			;;
-		'--')
-			shift
-			break
-			;;
-		*)
-			echo "Internal error parsing arguments!" >&2
-			exit 1
+		'VERSION')
+			version
+			exit 0
 			;;
 	esac
-done
 
-[ "$ACTION" == 'HELP' ] && usage && exit 0
-[ "$ACTION" == 'VERSION' ] && version && exit 0
-[ "$ACTION" == 'DOWNLOAD' ] && get_pkgbuild_files && exit 0
+	[ -z "$PKGBUILD" ] && usage && exit 1
+	[ -z "$SRCDIR" ] && usage && exit 1
+	[ -z "$PKGDIR" ] && usage && exit 1
 
-[ "$#" -ne 1 ] && echo "Exactly one valid action is required." >&2 && exit 1
-ACTION="$(echo -nE "$1" | tr '[:lower:]' '[:upper:]')"
+	[ "$#" -ne 1 ] && echo "Exactly one valid action is required." >&2 && exit 1
+	ACTION="$(echo -nE "$1" | tr '[:lower:]' '[:upper:]')"
+	import_pkgbuild
 
-[ -z "$PKGBUILD" ] && usage && exit 1
-[ -z "$SRCDIR" ] && usage && exit 1
-[ -z "$PKGDIR" ] && usage && exit 1
-[ "$ACTION" == 'DUMP' ] && dump_pkgbuild && exit 0 
-[ "$ACTION" == 'COMPILE' ] && compile_pkgbuild && exit 0
-[ "$ACTION" == 'DOWNLOAD' ] && download_pkgbuild_files && exit 0
-[ "$ACTION" == 'BUILD' ] && build_pkgbuild && exit 0 
-[ "$ACTION" == 'PACKAGE' ] && package_pkgbuild && exit 0 
-echo "Unrecognized action $ACTION" >&2 && exit 1
+	case "$ACTION" in
+		'DUMP')
+			dump_pkgbuild
+			;;
+		'COMPILE')
+			compile_pkgbuild
+			;;
+		'DOWNLOAD')
+			download_pkgbuild_files
+			;;
+		'BUILD')
+			build_pkgbuild
+			;;
+		'PACKAGE')
+			package_pkgbuild
+			;;
+		*)
+			echo "Unrecognized action $1. See --help for a list of valid actions." >&2
+			exit 1
+	esac
+	exit 0
 }
 
 # The beginning of the application
 # Quick checks and initing
 [[ $(getopt --test; echo $?) -ne 4 ]] && echo "getopt is not enhanced version, couldn't parse arguments." && exit 1
-#set -x
 main "$@"
