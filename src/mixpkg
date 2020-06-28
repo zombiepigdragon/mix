@@ -84,26 +84,34 @@ function import_pkgbuild() {
 }
 
 function build_pkgbuild() {
-	cd "$SRCDIR"
+	cd -- "$SRCDIR"
 	declare -F prepare >/dev/null && prepare
-	cd "$SRCDIR"
-	if ! declare -F build /dev/null; then
-		build
+	cd -- "$SRCDIR"
+	if declare -F build > /dev/null; then
+		echo "Building $pkgname"
+		build > /dev/null
 	else
 		echo 'Missing build step' >&2
 		exit 1
 	fi
-	cd "$SRCDIR"
-	declare -F check >/dev/null && check
+	cd -- "$SRCDIR"
+	if declare -F check; then
+		check > /dev/null
+	fi
 }
 
 function package_pkgbuild() {
-	if ! declare -F package /dev/null; then
-		build
+	if declare -F package > /dev/null; then
+		echo "Packaging $pkgname"
+		cd -- "$PKGDIR"
+		package > /dev/null
 	else
-		echo 'Missing package step' >&2
+		echo 'Missing package function!' >&2
 		exit 1
 	fi
+	package_location="$(realpath -- "$PKGDIR/../$pkgname.tar.xz")"
+	bsdtar -cJf "$package_location" -C "$PKGDIR" .
+	echo "Created $pkgname package in $package_location"
 }
 
 function compile_pkgbuild() {
