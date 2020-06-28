@@ -138,7 +138,8 @@ function download_pkgbuild_files() {
 			if [ -e "$result_file" ]; then
 				echo "$result_file is already downloaded."
 			else
-				curl "$source_file" -o "$result_file"
+				echo "Downloading $source_file"
+				curl "$source_file" -Lfo "$result_file" 
 			fi
 		else
 			# source_file is a path
