@@ -124,6 +124,37 @@ function dump_pkgbuild() {
 function download_pkgbuild_files() {
 	local urlregex
 	readonly urlregex='^(https?|ftp|file)://[-A-Za-z0-9\+&@#/%?=~_|!:,.;]*[-A-Za-z0-9\+&@#/%=~_|]\.[-A-Za-z0-9\+&@#/%?=~_|!:,.;]*[-A-Za-z0-9\+&@#/%=~_|]$'
+	local checksums
+	local checksumcommand
+	if [ -n "${md5sums+x}" ]; then
+		checksums=(${md5sums[@]})
+		checksumcommand='md5sum'
+	fi
+	if [ -n "${sha1sums+x}" ]; then
+		checksums=(${sha1sums[@]})
+		checksumcommand='sha1sum'
+	fi
+	if [ -n "${sha224sums+x}" ]; then
+		checksums=(${sha224sums[@]})
+		checksumcommand='sha224sum'
+	fi
+	if [ -n "${sha256sums+x}" ]; then
+		checksums=(${sha256sums[@]})
+		checksumcommand='sha256sum'
+	fi
+	if [ -n "${sha384sums+x}" ]; then
+		checksums=(${sha384sums[@]})
+		checksumcommand='sha384sum'
+	fi
+	if [ -n "${sha512sums+x}" ]; then
+		checksums=(${sha512sums[@]})
+		checksumcommand='sha512sum'
+	fi
+	if [ -n "${b2sums+x}" ]; then
+		checksums=(${b2sums[@]})
+		checksumcommand='b2sum'
+	fi
+	[ -z "$checksumcommand" ] && echo "Warning: No checksum type found." >&2
 	for i in "${!source[@]}"; do
 		source_file="$(echo -n "${source[$i]}" | awk -F '::' '{ print $NF }')"
 		local result_file
@@ -150,10 +181,9 @@ function download_pkgbuild_files() {
 		if [ "$NOGPG" = false ] && [[ "$source_file" == *'.sig' ]]; then
 			gpg --verify "$result_file" "${result_file%.*}"
 		fi
-		# TODO: Needs to support the other sums elegantly
-		[ "${md5sums[$i]}" != 'SKIP' ] && \
-			[ "${md5sums[$i]}" != "$(md5sum "$result_file" | awk '{print $1}')" ] && \
-			echo "$result_file failed MD5 validation!" && exit 1
+		[ "${checksums[$i]}" != 'SKIP' ] && \
+			[ "${checksums[$i]}" != "$($checksumcommand "$result_file" | awk '{print $1}')" ] && \
+			echo "$result_file failed checksum validation!" && exit 1
 		if [[ ! " ${noextract[*]} " == *" $source_file "* ]]; then
 			bsdtar -tf "$result_file" &>/dev/null && bsdtar -C "$SRCDIR" -xf "$result_file"
 		fi
