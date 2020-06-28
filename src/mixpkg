@@ -7,6 +7,34 @@ SRCDIR=""
 PKGDIR=""
 MIXPKG="$(realpath "${BASH_SOURCE[0]}")"
 
+NOGPG=false
+
+pkgname=''
+pkgver=''
+pkgrel=''
+epoch=0;
+pkgdesc=''
+url=""
+declare -a license=()
+install=''
+changelog=''
+declare -a source=()
+declare -a validpgpkeys=()
+declare -a noextract=()
+declare -a md5sums=()
+declare -a sha1sums=() sha224sums=() sha256sums=() sha384sums=() sha512sums=() b2sums=()
+declare -a groups=()
+declare -a arch=()
+declare -a backup=()
+declare -a depends=()
+declare -a makedepends=()
+declare -a checkdepends=()
+declare -a optdepends=()
+declare -a conflicts=()
+declare -a provides=()
+declare -a replaces=()
+declare -a options=()
+
 function version() {
 	echo "mixpkg - 0.0.0"
 	echo "Created by Lemix Team <lemixproject@gmail.com>"
@@ -31,7 +59,8 @@ OPTIONS:
 
 ACTIONS:
 dump: Output all of the information provided in the pkgbuild in a parseable format
-compile: Build the pkgbuild and then package it
+compile: Perform all tasks needed to create a package
+download: Download extract, and verify pkgbuild sources
 build: Build the pkgbuild
 package: Run the package step of the pkgbuild
 EOF
@@ -44,31 +73,6 @@ function import_pkgbuild() {
 	startdir="$(dirname "$MIXPKG")"
 	export startdir # Seperate line to allow set -e
 	# Defaults for when nothing's defined
-	pkgname=''
-	pkgver=''
-	pkgrel=''
-	epoch=0;
-	pkgdesc=''
-	url=""
-	declare -a license=()
-	install=''
-	changelog=''
-	declare -a source=()
-	declare -a validpgpkeys=()
-	declare -a noextract=()
-	declare -a md5sums=()
-	declare -a sha1sums=() sha224sums=() sha256sums=() sha384sums=() sha512sums=() b2sums=()
-	declare -a groups=()
-	declare -a arch=()
-	declare -a backup=()
-	declare -a depends=()
-	declare -a makedepends=()
-	declare -a checkdepends=()
-	declare -a optdepends=()
-	declare -a conflicts=()
-	declare -a provides=()
-	declare -a replaces=()
-	declare -a options=()
 	# Disable lint for undefined source
 	# shellcheck source=/dev/null
 	source "$PKGBUILD"
@@ -115,23 +119,50 @@ function dump_pkgbuild() {
 	printf '%q\t%s\t%q\t%d\t%s\t%s\t%q' "${pkgname[*]}" "$pkgver" "$pkgrel" "$epoch" "$pkgdesc" "$url" "${arch[*]}"
 }
 
-# Arguments are urls or filenames
 function download_pkgbuild_files() {
 	import_pkgbuild
-	for source_file in ${source[*]}; do
-		# TODO: Allow for files with rename syntax
-		local result_file="$SRCDIR/$source_file"
-		# TODO: Not all files will be online, check for local files first
-		curl "$source_file" -o "$result_file"
-		# TODO: Check $no_extract
-		bsdtar -tf "$result_file" && bsdtar -xf "$result_file"
+	local urlregex
+	readonly urlregex='^(https?|ftp|file)://[-A-Za-z0-9\+&@#/%?=~_|!:,.;]*[-A-Za-z0-9\+&@#/%=~_|]\.[-A-Za-z0-9\+&@#/%?=~_|!:,.;]*[-A-Za-z0-9\+&@#/%=~_|]$'
+	for i in "${!source[@]}"; do
+		source_file="${source[$i]}"
+		local result_file
+		# Takes the end of the URL and allows rename syntax
+		# I believe this is correct, but I'm not 100%
+		result_file="$SRCDIR/$(basename -- "$source_file" | grep -o '[^:]*$')"
+		if [[ "$source_file" =~ $urlregex ]]; then
+			# source_file is a url
+			if [ -e "$result_file" ]; then
+				echo "$result_file is already downloaded."
+			else
+				curl "$source_file" -o "$result_file"
+			fi
+		else
+			# source_file is a path
+			if [ ! -e "$result_file" ]; then
+				if [ ! -e "$source_file" ]; then
+					echo "Failed to locate local file $source_file!" >&2 && exit 1
+				else
+					cp -- "$source_file" "$result_file"
+				fi
+			fi
+		fi
+		if [ "$NOGPG" = false ] && [[ "$source_file" == *'.sig' ]]; then
+			gpg --verify "$result_file" "${result_file%.*}"
+		fi
+		# TODO: Needs to support the other sums elegantly
+		[ "${md5sums[$i]}" != 'SKIP' ] && \
+			[ "${md5sums[$i]}" != "$(md5sum "$result_file" | awk '{print $1}')" ] && \
+			echo "$result_file failed MD5 validation!" && exit 1
+		if [[ ! " ${noextract[*]} " == *" $source_file "* ]]; then
+			bsdtar -tf "$result_file" &>/dev/null && bsdtar -C "$SRCDIR" -xf "$result_file"
+		fi
+		echo "Successfully retrieved $result_file"
 	done
-	# TODO: Check for a .sig and check it
 }
 
 function main() {
 	# Processes arguments with getopt (enhanced)
-	TEMP=$(getopt -o 'hVp:s:d:' --long 'help,version' -n 'mixpkg' -- "$@")
+	TEMP=$(getopt -o 'hVp:s:d:' --long 'help,version,nogpg' -n 'mixpkg' -- "$@")
 	[ $? -ne 0 ] && echo "Exiting" && exit 1
 	eval set -- "$TEMP"
 	unset TEMP
@@ -168,6 +199,11 @@ while true; do
 			shift 2
 			continue
 			;;
+		'--nogpg')
+			NOGPG="true"
+			shift
+			continue
+			;;
 		'--')
 			shift
 			break
@@ -190,7 +226,8 @@ ACTION="$(echo -nE "$1" | tr '[:lower:]' '[:upper:]')"
 [ -z "$SRCDIR" ] && usage && exit 1
 [ -z "$PKGDIR" ] && usage && exit 1
 [ "$ACTION" == 'DUMP' ] && dump_pkgbuild && exit 0 
-[ "$ACTION" == 'COMPILE' ] && compile_pkgbuild && exit 0 
+[ "$ACTION" == 'COMPILE' ] && compile_pkgbuild && exit 0
+[ "$ACTION" == 'DOWNLOAD' ] && download_pkgbuild_files && exit 0
 [ "$ACTION" == 'BUILD' ] && build_pkgbuild && exit 0 
 [ "$ACTION" == 'PACKAGE' ] && package_pkgbuild && exit 0 
 echo "Unrecognized action $ACTION" >&2 && exit 1
