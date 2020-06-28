@@ -90,9 +90,6 @@ function build_pkgbuild() {
 	if declare -F build > /dev/null; then
 		echo "Building $pkgname"
 		build > /dev/null
-	else
-		echo 'Missing build step' >&2
-		exit 1
 	fi
 	cd -- "$SRCDIR"
 	if declare -F check; then
