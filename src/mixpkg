@@ -100,7 +100,7 @@ function build_pkgbuild() {
 function package_pkgbuild() {
 	if declare -F package > /dev/null; then
 		echo "Packaging $pkgname"
-		cd -- "$PKGDIR"
+		cd -- "$SRCDIR"
 		package > /dev/null
 	else
 		echo 'Missing package function!' >&2
@@ -125,11 +125,10 @@ function download_pkgbuild_files() {
 	local urlregex
 	readonly urlregex='^(https?|ftp|file)://[-A-Za-z0-9\+&@#/%?=~_|!:,.;]*[-A-Za-z0-9\+&@#/%=~_|]\.[-A-Za-z0-9\+&@#/%?=~_|!:,.;]*[-A-Za-z0-9\+&@#/%=~_|]$'
 	for i in "${!source[@]}"; do
-		source_file="${source[$i]}"
+		source_file="$(echo -n "${source[$i]}" | awk -F '::' '{ print $NF }')"
 		local result_file
 		# Takes the end of the URL and allows rename syntax
-		# I believe this is correct, but I'm not 100%
-		result_file="$SRCDIR/$(basename -- "$source_file" | grep -o '[^:]*$')"
+		result_file="$SRCDIR/$(basename -- "${source[$i]}" | awk -F '::' '{ print $1 }')"
 		if [[ "$source_file" =~ $urlregex ]]; then
 			# source_file is a url
 			if [ -e "$result_file" ]; then
