@@ -1,92 +1,87 @@
 use crate::action::Actionable;
-use crate::error::Error as mix_Error;
 use serde::{Deserialize, Serialize};
-use std::error::Error;
-use std::fmt::Display;
-use std::fs::File;
-use std::io;
-use std::io::prelude::*;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::{fs::File, io::prelude::*};
 
-/// The database that all package operations are stored upon. It does all the basic functionality required to keep track of installed packages.
-pub trait PackageDatabase: Actionable {
-    /// Loads the database from the specified path.
-    ///
-    /// Note: The path is also used automatically to save the database.
-    fn load(filename: PathBuf) -> Result<Self, Box<dyn Error>>
-    where
-        Self: Sized;
-    /// Saves the database back to the disk with the path set in `PackageDatabase::load`.
-    ///
-    /// Note: Allowed to avoid actual writes to the disk if they are deemed unnecessary. For example, querying the database without installing any packages might not be written to disk.
-    fn save(&self) -> Result<(), Box<dyn Error>>;
-    /// Returns whether a call to `PackageDatabase::save` would have any effect.
-    fn needs_save(&self) -> bool;
-    /// Returns the first package with the given name.
-    fn get_package(&self, package_name: &str) -> Option<&Package>;
-    /// Returns the first package with the given name.
-    fn get_mut_package(&mut self, package_name: &str) -> Option<&mut Package>;
+/// A singular package. A package is a name, list of files, and some metadata.
+/// The metadata is what allows retrieving a package, viewing the files of a package, and many similar actions.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Package {
+    name: String,
+    version: Version,
+    state: InstallState,
 }
 
-/// The default package database.
-#[derive(Serialize, Deserialize, Debug)]
-pub struct PackageList {
-    /// The location of the package cache.
-    filename: PathBuf,
-    /// The package cache.
-    cache: Vec<Package>,
-    /// The cache to be rewritten.
-    #[serde(skip)]
-    invalidated: bool,
-}
-
-impl PackageList {
-    fn all_package_names(&self) -> Vec<String> {
-        self.cache
-            .iter()
-            .map(|package| package.name.clone())
-            .collect()
+impl std::fmt::Display for Package {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:\t{};\t{}", self.name, self.version, self.state)
     }
 }
 
-impl Actionable for PackageList {
-    fn install(&mut self, packages: &[String]) -> Result<(), Box<dyn Error>> {
-        self.invalidated = true;
+/// The package database. It provides all actions needed to manage packages.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Database {
+    packages: Vec<Package>,
+}
+
+impl Database {
+    /// Given the name of a package, provide the package itself.
+    pub fn get_package(&self, package_name: &str) -> Option<&Package> {
+        for package in &self.packages {
+            if package.name == package_name {
+                return Some(package);
+            }
+        }
+        None
+    }
+    /// Given the name of a package, provide the package itself.
+    pub fn get_mut_package(&mut self, package_name: &str) -> Option<&mut Package> {
+        for package in &mut self.packages {
+            if package.name == package_name {
+                return Some(package);
+            }
+        }
+        None
+    }
+
+    /// Load the package database from disk.
+    pub fn load(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+        let file = File::open(path)?;
+        Ok(serde_cbor::from_reader(file)?)
+    }
+
+    /// Save the current package database to the disk.
+    pub fn save(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        let file = File::create(path)?;
+        Ok(serde_cbor::to_writer(file, self)?)
+    }
+
+    /// Create an empty database. Should only be used on fresh installs.
+    pub fn new_empty() -> Self {
+        Self { packages: vec![] }
+    }
+}
+
+impl Actionable for Database {
+    fn install(&mut self, packages: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         for package_name in packages {
-            if let Some(package) = self.get_package(package_name) {
-                match package.install_state {
-                    InstallState::ManuallyInstalled => {
-                        eprintln!("Package {} is already installed.", package_name)
-                    }
-                    InstallState::DependencyInstalled => eprintln!(
-                        "Package {} is already installed. Marking as manually installed.",
-                        package_name
-                    ),
-                    InstallState::NotInstalled => eprintln!(
-                        "Package {} is known but not installed. Marking as manually installed.",
-                        package_name
-                    ),
-                };
-                self.get_mut_package(package_name).unwrap().install_state =
-                    InstallState::ManuallyInstalled;
-            } else {
+            if let Some(package) = self.get_mut_package(package_name) {
                 println!("Installing {}", package_name);
-                let package = Package {
-                    name: package_name.clone(),
-                    install_state: InstallState::ManuallyInstalled,
-                };
-                self.cache.push(package);
+                package.state = InstallState::Manual;
+            } else {
+                return Err(format!("Failed to find package {}.", package_name).into());
             }
         }
         Ok(())
     }
 
     fn remove(&mut self, packages: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-        self.invalidated = true;
         for package_name in packages {
             if let Some(package) = self.get_mut_package(package_name) {
-                println!("Removing {}.", package);
-                package.install_state = InstallState::NotInstalled;
+                println!("Removing {}", package_name);
+                package.state = InstallState::Uninstalled;
+            } else {
+                return Err(format!("Didn't recognize package {}.", package_name).into());
             }
         }
         Ok(())
@@ -94,10 +89,8 @@ impl Actionable for PackageList {
 
     fn synchronize(
         &mut self,
-        _next_action: &Option<Box<crate::action::Action>>,
+        next_action: &Option<Box<crate::action::Action>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        self.invalidated = true;
-        // Using Arch Linux's `base` dependencies list, hopefully they're okay with that
         let default_packages = vec![
             "bash",
             "bzip2",
@@ -129,32 +122,37 @@ impl Actionable for PackageList {
         ];
         for package_name in default_packages {
             if self.get_package(package_name).is_none() {
-                self.cache.push(Package {
+                self.packages.push(Package {
                     name: package_name.to_string(),
-                    install_state: InstallState::NotInstalled,
+                    version: Version::Unknown,
+                    state: InstallState::Uninstalled,
                 });
             }
+        }
+        if let Some(action) = next_action {
+            action.execute(self)?;
         }
         Ok(())
     }
 
     fn update(&mut self, packages: &Option<Vec<String>>) -> Result<(), Box<dyn std::error::Error>> {
-        self.invalidated = true;
-        let package_names = match packages {
-            Some(package_names) => package_names.clone(),
-            None => self.all_package_names(),
-        };
-        let mut packages = Vec::new();
-        for package_name in package_names {
-            if let Some(package) = self.get_package(&package_name) {
-                packages.push(package);
-            } else {
-                eprintln!("Package {} not found, and can't be updated.", package_name);
-                return Err(mix_Error::PackageNotFound.into());
-            }
+        if packages.is_none() {
+            todo!("Currently needs a package list!");
         }
-        for package in packages {
-            println!("Updating {}.", package.name);
+        let packages = packages.clone().unwrap();
+        for package_name in &packages {
+            let mut package = match self.get_mut_package(package_name) {
+                Some(package) => package,
+                None => return Err(format!("Failed to find package {}", package_name).into()),
+            };
+            if let InstallState::Uninstalled = package.state {
+                return Err(format!("Package {} is not installed.", package_name).into());
+            }
+            println!("Updating {}", package.name);
+            package.version = match package.version {
+                Version::SemVer(x, y, z) => Version::SemVer(x + 1, y, z),
+                Version::Unknown => Version::SemVer(0, 0, 0),
+            };
         }
         Ok(())
     }
@@ -177,132 +175,116 @@ impl Actionable for PackageList {
         Ok(())
     }
 
-    fn list(&self) -> Result<(), Box<dyn Error>> {
-        for package in &self.cache {
-            println!("Package '{}': {}", &package.name, &package.install_state);
+    fn list(&self) -> Result<(), Box<dyn std::error::Error>> {
+        for package in &self.packages {
+            println!("{}", package);
         }
         Ok(())
     }
 }
 
-impl PackageDatabase for PackageList {
-    fn load(path: PathBuf) -> Result<Self, Box<dyn Error>> {
-        match File::open(&path) {
-            Ok(file) => match serde_cbor::from_reader(file) {
-                Ok(package_database) => Ok(package_database),
-                Err(error) => match error.classify() {
-                    serde_cbor::error::Category::Syntax => {
-                        eprintln!("Database file had invalid syntax! Restore a backup.");
-                        Err(error.into())
-                    }
-                    serde_cbor::error::Category::Data => {
-                        eprintln!("Database file contains invalid data! Restore a backup.");
-                        Err(error.into())
-                    }
-                    _ => {
-                        eprintln!("Error parsing database: {}", error);
-                        Err(error.into())
-                    }
-                },
-            },
-            Err(error) => match error.kind() {
-                io::ErrorKind::NotFound => {
-                    eprintln!("Warning: Failed to load package database from disk, creating an empty database.");
-                    Ok(PackageList {
-                        filename: path,
-                        cache: Vec::new(),
-                        invalidated: false,
-                    })
-                }
-                io::ErrorKind::PermissionDenied => {
-                    eprintln!("Permission denied opening package database.");
-                    eprintln!("Are you root?");
-                    Err(error.into())
-                }
-                _ => {
-                    eprintln!("Error opening database: {}", error);
-                    Err(error.into())
-                }
-            },
-        }
-    }
-
-    fn save(&self) -> Result<(), Box<dyn Error>> {
-        match File::create(&self.filename) {
-            Ok(file) => Ok(serde_cbor::to_writer(file, &self)?),
-            Err(error) => {
-                match error.kind() {
-                    io::ErrorKind::PermissionDenied => {
-                        eprintln!("Permission denied opening package database.\nChanges could not be saved.");
-                        Err(error.into())
-                    }
-                    _ => Err(error.into()),
-                }
-            }
-        }
-    }
-
-    fn needs_save(&self) -> bool {
-        self.invalidated
-    }
-
-    fn get_package(&self, package_name: &str) -> Option<&Package> {
-        for package in &self.cache {
-            if package.name == package_name {
-                return Some(&package);
-            }
-        }
-        None
-    }
-
-    fn get_mut_package(&mut self, package_name: &str) -> Option<&mut Package> {
-        let mut index = None;
-        for (i, package) in self.cache.iter().enumerate() {
-            if package.name == package_name {
-                index = Some(i);
-                break;
-            }
-        }
-        if let Some(index) = index {
-            return self.cache.get_mut(index);
-        }
-        None
-    }
-}
-
-/// The current installation state of a package
-#[derive(Serialize, Deserialize, Debug)]
+/// The current state of the package.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum InstallState {
-    /// The package was installed by a user.
-    ManuallyInstalled,
-    /// The package was installed as a dependency and can be removed during a clean.
-    DependencyInstalled,
-    /// The package is stored in the cache, but not installed.
-    NotInstalled,
+    /// The package was installed intentionally, and can not be automatically removed.
+    Manual,
+    /// The package was installed to build another package or as a runtime dependency of a package.
+    /// It can be removed if and only if no other packages depend on it.
+    Dependency,
+    /// The package is not currently installed.
+    Uninstalled,
 }
 
-impl Display for InstallState {
+impl std::fmt::Display for InstallState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let message = match &self {
-            Self::ManuallyInstalled => "Manually Installed",
-            Self::DependencyInstalled => "Dependency Installed",
-            Self::NotInstalled => "Not Installed",
-        };
-        write!(f, "{}", message)
+        write!(
+            f,
+            "{}",
+            match self {
+                InstallState::Manual => "Manually installed",
+                InstallState::Dependency => "Dependency installation",
+                InstallState::Uninstalled => "Not installed",
+            }
+        )
     }
 }
 
-/// The combination of all information making up a package.
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Package {
-    /// The current installation state of the package.
-    pub install_state: InstallState,
-    /// The name of the package.
-    pub name: String,
+/// A package's version.
+/// # Examples:
+/// ```rust
+/// # use mix::package::Version;
+/// // Everything is greater than Version::Unknown
+/// assert!(Version::SemVer(0, 0, 0) > Version::Unknown);
+/// assert!(Version::SemVer(1, 0, 0) > Version::Unknown);
+/// // Check twice for asymmetry
+/// assert!(Version::Unknown < Version::SemVer(0, 0, 0));
+/// assert!(Version::Unknown < Version::SemVer(1, 0, 0));
+/// // Equal versions are the same
+/// assert_eq!(Version::SemVer(1, 0, 0), Version::SemVer(1, 0, 0));
+/// assert_eq!(Version::SemVer(0, 1, 0), Version::SemVer(0, 1, 0));
+/// assert_eq!(Version::SemVer(1, 0, 1), Version::SemVer(1, 0, 1));
+/// assert_eq!(Version::Unknown, Version::Unknown);
+/// // Normal version checks
+/// assert!(Version::SemVer(1, 0, 0) > Version::SemVer(0, 1, 0));
+/// assert!(Version::SemVer(0, 0, 1) > Version::SemVer(0, 0, 0));
+/// assert!(Version::SemVer(1, 0, 0) < Version::SemVer(2, 1, 0));
+/// ```
+#[derive(Clone, Debug, Eq, Serialize, Deserialize)]
+pub enum Version {
+    /// A semantic version.
+    SemVer(u32, u32, u32),
+    /// The version is unknown and/or doesn't matter. It's always smaller than any other version.
+    Unknown,
 }
 
-impl Display for Package {
+impl Ord for Version {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        match (self, other) {
+            (Version::SemVer(maj1, min1, rev1), Version::SemVer(maj2, min2, rev2)) => {
+                if maj1 != maj2 {
+                    maj1.cmp(maj2)
+                } else if min1 != min2 {
+                    min1.cmp(min2)
+                } else if rev1 != rev2 {
+                    rev1.cmp(rev2)
+                } else {
+                    Ordering::Equal
+                }
+            }
+            (Version::SemVer(_, _, _), Version::Unknown) => Ordering::Greater,
+            (Version::Unknown, Version::SemVer(_, _, _)) => Ordering::Less,
+            (Version::Unknown, Version::Unknown) => Ordering::Equal,
+        }
+    }
+}
+
+impl PartialOrd for Version {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Version {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            Version::SemVer(maj1, min1, rev1) => match other {
+                Version::SemVer(maj2, min2, rev2) => maj1 == maj2 && min1 == min2 && rev1 == rev2,
+                Version::Unknown => false,
+            },
+            Version::Unknown => match other {
+                Version::SemVer(_, _, _) => false,
+                Version::Unknown => true,
+            },
+        }
+    }
+}
+
+impl std::fmt::Display for Version {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.name)
+        match self {
+            Version::SemVer(x, y, z) => write!(f, "{}.{}.{}", x, y, z),
+            Version::Unknown => write!(f, "Unknown version"),
+        }
     }
 }
