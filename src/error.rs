@@ -1,20 +1,22 @@
-/// The errors than can come from the package manager.
-#[derive(Debug, PartialEq)]
-pub enum Error {
-    /// A package was needed but was not found in the cache.
+use std::path::PathBuf;
+use thiserror::Error;
+
+/// Errors that can be produced by mix.
+#[derive(Debug, Error)]
+pub enum MixError {
+    /// The package(s) were not in the database.
+    #[error("Package not found")]
     PackageNotFound,
-}
-
-impl std::error::Error for Error {}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Self::PackageNotFound => "Package Not Found",
-            }
-        )
-    }
+    /// The package(s) need to be installed, but were not.
+    #[error("Package not installed")]
+    PackageNotInstalled,
+    /// The requested file was not found.
+    #[error("File not found: {0}")]
+    FileNotFound(PathBuf),
+    /// An IOError that does not recieve special treatment occurred.
+    #[error(transparent)]
+    IOError(#[from] std::io::Error),
+    /// An error when serializing or deserializing.
+    #[error(transparent)]
+    SerializationError(#[from] serde_cbor::error::Error),
 }

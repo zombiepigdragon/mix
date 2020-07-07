@@ -1,4 +1,4 @@
-use std::error::Error;
+use crate::error::MixError;
 
 /// An action that can be performed by the package database.
 #[derive(Debug, PartialEq)]
@@ -20,17 +20,17 @@ pub enum Action {
 /// Implements behaviors corresponding to an `Action`.
 pub trait Actionable {
     /// Install the given packages to the system
-    fn install(&mut self, packages: &[String]) -> Result<(), Box<dyn Error>>;
+    fn install(&mut self, packages: &[String]) -> Result<(), MixError>;
     /// Remove the given packages from the system
-    fn remove(&mut self, packages: &[String]) -> Result<(), Box<dyn Error>>;
+    fn remove(&mut self, packages: &[String]) -> Result<(), MixError>;
     /// Bring the local package cache in sync with the remote cache, then run `next_action`
-    fn synchronize(&mut self, next_action: &Option<Box<Action>>) -> Result<(), Box<dyn Error>>;
+    fn synchronize(&mut self, next_action: &Option<Box<Action>>) -> Result<(), MixError>;
     /// Bring the given packages to the newest version, defaulting to every installed package
-    fn update(&mut self, packages: &Option<Vec<String>>) -> Result<(), Box<dyn Error>>;
+    fn update(&mut self, packages: &Option<Vec<String>>) -> Result<(), MixError>;
     /// Get the files of the given packages
-    fn fetch(&self, packages: &[String]) -> Result<(), Box<dyn Error>>;
+    fn fetch(&self, packages: &[String]) -> Result<(), MixError>;
     /// List the packages currently installed
-    fn list(&self) -> Result<(), Box<dyn Error>>;
+    fn list(&self) -> Result<(), MixError>;
 }
 
 impl Action {
@@ -58,7 +58,7 @@ impl Action {
     }
 
     /// Calls the corresponding method on the given `Actionable`.
-    pub fn execute<T: Actionable>(&self, executor: &mut T) -> Result<(), Box<dyn Error>> {
+    pub fn execute<T: Actionable>(&self, executor: &mut T) -> Result<(), MixError> {
         match self {
             Action::Install(packages) => executor.install(packages),
             Action::Remove(packages) => executor.remove(packages),

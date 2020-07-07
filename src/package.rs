@@ -1,4 +1,5 @@
 use crate::action::Actionable;
+use crate::error::MixError;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::{fs::File, io::prelude::*};
@@ -45,13 +46,19 @@ impl Database {
     }
 
     /// Load the package database from disk.
-    pub fn load(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
-        let file = File::open(path)?;
+    pub fn load(path: &Path) -> Result<Self, MixError> {
+        let file = match File::open(path) {
+            Ok(file) => file,
+            Err(err) => match err.kind() {
+                std::io::ErrorKind::NotFound => return Err(MixError::FileNotFound(path.into())),
+                _ => return Err(MixError::IOError(err)),
+            },
+        };
         Ok(serde_cbor::from_reader(file)?)
     }
 
     /// Save the current package database to the disk.
-    pub fn save(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn save(&self, path: &Path) -> Result<(), MixError> {
         let file = File::create(path)?;
         Ok(serde_cbor::to_writer(file, self)?)
     }
@@ -63,25 +70,25 @@ impl Database {
 }
 
 impl Actionable for Database {
-    fn install(&mut self, packages: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    fn install(&mut self, packages: &[String]) -> Result<(), MixError> {
         for package_name in packages {
             if let Some(package) = self.get_mut_package(package_name) {
                 println!("Installing {}", package_name);
                 package.state = InstallState::Manual;
             } else {
-                return Err(format!("Failed to find package {}.", package_name).into());
+                return Err(MixError::PackageNotFound);
             }
         }
         Ok(())
     }
 
-    fn remove(&mut self, packages: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    fn remove(&mut self, packages: &[String]) -> Result<(), MixError> {
         for package_name in packages {
             if let Some(package) = self.get_mut_package(package_name) {
                 println!("Removing {}", package_name);
                 package.state = InstallState::Uninstalled;
             } else {
-                return Err(format!("Didn't recognize package {}.", package_name).into());
+                return Err(MixError::PackageNotFound);
             }
         }
         Ok(())
@@ -90,7 +97,7 @@ impl Actionable for Database {
     fn synchronize(
         &mut self,
         next_action: &Option<Box<crate::action::Action>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), MixError> {
         let default_packages = vec![
             "bash",
             "bzip2",
@@ -135,7 +142,7 @@ impl Actionable for Database {
         Ok(())
     }
 
-    fn update(&mut self, packages: &Option<Vec<String>>) -> Result<(), Box<dyn std::error::Error>> {
+    fn update(&mut self, packages: &Option<Vec<String>>) -> Result<(), MixError> {
         if packages.is_none() {
             todo!("Currently needs a package list!");
         }
@@ -143,10 +150,10 @@ impl Actionable for Database {
         for package_name in &packages {
             let mut package = match self.get_mut_package(package_name) {
                 Some(package) => package,
-                None => return Err(format!("Failed to find package {}", package_name).into()),
+                None => return Err(MixError::PackageNotFound),
             };
             if let InstallState::Uninstalled = package.state {
-                return Err(format!("Package {} is not installed.", package_name).into());
+                return Err(MixError::PackageNotInstalled);
             }
             println!("Updating {}", package.name);
             package.version = match package.version {
@@ -157,7 +164,7 @@ impl Actionable for Database {
         Ok(())
     }
 
-    fn fetch(&self, packages: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    fn fetch(&self, packages: &[String]) -> Result<(), MixError> {
         for package_name in packages {
             let path = PathBuf::from(format!("{}.PKGBUILD", package_name));
             if path.exists() {
@@ -175,7 +182,7 @@ impl Actionable for Database {
         Ok(())
     }
 
-    fn list(&self) -> Result<(), Box<dyn std::error::Error>> {
+    fn list(&self) -> Result<(), MixError> {
         for package in &self.packages {
             println!("{}", package);
         }
