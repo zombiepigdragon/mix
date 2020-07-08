@@ -2,7 +2,7 @@
 # Make the environment programmer friendly
 set -o errexit -o pipefail -o noclobber -o nounset
 
-PKGBUILD='PKGBUILD'
+PKGBUILD=""
 SRCDIR=""
 PKGDIR=""
 MIXPKG="$(realpath "${BASH_SOURCE[0]}")"
@@ -70,7 +70,7 @@ EOF
 function import_pkgbuild() {
 	export srcdir="$SRCDIR"
 	export pkgdir="$PKGDIR"
-	startdir="$(dirname "$MIXPKG")"
+	startdir="$(dirname "$PKGBUILD")"
 	export startdir # Seperate line to allow set -e
 	# Defaults for when nothing's defined
 	# Disable lint for undefined source
@@ -106,8 +106,12 @@ function package_pkgbuild() {
 		echo 'Missing package function!' >&2
 		exit 1
 	fi
+	cd -- "$startdir"
+	[ -z "$install" ] || cp -- "$install" "$PKGDIR/$pkgname.install"
+	[ -z "$changelog" ] || cp -- "$changelog" "$PKGDIR/$pkgname.changelog"
 	package_location="$(realpath -- "$PKGDIR/../$pkgname.tar.xz")"
-	bsdtar -cJf "$package_location" -C "$PKGDIR" .
+	dump_pkgbuild >| "$PKGDIR/.MANIFEST"
+	bsdtar -cJf "$package_location" -C "$PKGDIR" --strip-components=1 .
 	echo "Created $pkgname package in $package_location"
 }
 
@@ -118,14 +122,43 @@ function compile_pkgbuild() {
 }
 
 function dump_pkgbuild() {
-	printf '%q\t%s\t%q\t%d\t%s\t%s\t%q' "${pkgname[*]}" "$pkgver" "$pkgrel" "$epoch" "$pkgdesc" "$url" "${arch[*]}"
+	cat << EOF
+name = "$pkgname"
+version = "$pkgver"
+release = "$pkgrel"
+epoch = $epoch
+pkgdesc = "$pkgdesc"
+url = "$url"
+EOF
+	(
+	# Turns arguments into a toml key and array
+	function key_array() {
+		printf '%s = [' "$1"
+		shift
+		items=("$@")
+		for item in "${items[@]}"; do
+			printf '"%s", ' "$item"
+		done
+		printf ']\n'
+	}
+	key_array 'licence' "${license[@]}"
+	key_array 'groups' "${groups[@]}"
+	key_array 'backup' "${backup[@]}"
+	key_array 'depends' "${depends[@]}"
+	key_array 'makedepends' "${makedepends[@]}"
+	key_array 'checkdepends' "${checkdepends[@]}"
+	key_array 'optdepends' "${optdepends[@]}"
+	key_array 'conflicts' "${conflicts[@]}"
+	key_array 'provides' "${provides[@]}"
+	key_array 'replaces' "${replaces[@]}"
+	)
 }
 
 function download_pkgbuild_files() {
 	local urlregex
 	readonly urlregex='^(https?|ftp|file)://[-A-Za-z0-9\+&@#/%?=~_|!:,.;]*[-A-Za-z0-9\+&@#/%=~_|]\.[-A-Za-z0-9\+&@#/%?=~_|!:,.;]*[-A-Za-z0-9\+&@#/%=~_|]$'
 	local checksums
-	local checksumcommand
+	local checksumcommand=''
 	if [ -n "${md5sums+x}" ]; then
 		checksums=(${md5sums[@]})
 		checksumcommand='md5sum'
