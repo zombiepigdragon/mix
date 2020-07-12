@@ -19,6 +19,7 @@ declare -a license=()
 install=''
 changelog=''
 declare -a source=()
+# shellcheck disable=SC2034 # TODO
 declare -a validpgpkeys=()
 declare -a noextract=()
 declare -a md5sums=()
@@ -33,6 +34,7 @@ declare -a optdepends=()
 declare -a conflicts=()
 declare -a provides=()
 declare -a replaces=()
+# shellcheck disable=SC2034 # TODO
 declare -a options=()
 
 function version() {
@@ -154,6 +156,9 @@ EOF
 	)
 }
 
+# There doesn't seem to be a way to avoid the issue. If there's a way to do this
+# without triggering the warning, open a PR.
+# shellcheck disable=SC2206
 function download_pkgbuild_files() {
 	local urlregex
 	readonly urlregex='^(https?|ftp|file)://[-A-Za-z0-9\+&@#/%?=~_|!:,.;]*[-A-Za-z0-9\+&@#/%=~_|]\.[-A-Za-z0-9\+&@#/%?=~_|!:,.;]*[-A-Za-z0-9\+&@#/%=~_|]$'

@@ -11,6 +11,7 @@ jobs:
 before_script:
 - rustup component add clippy rustfmt
 script:
+- shellcheck src/mixpkg
 - cargo fmt -- --check
 - cargo clippy
 - cargo build
