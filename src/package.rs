@@ -2,7 +2,10 @@ use crate::action::Actionable;
 use crate::error::MixError;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::{fs::File, io::prelude::*};
+use std::{
+    fs::{self, File},
+    io::prelude::*,
+};
 
 /// A singular package. A package is a name, list of files, and some metadata.
 /// The metadata is what allows retrieving a package, viewing the files of a package, and many similar actions.
@@ -11,6 +14,28 @@ pub struct Package {
     name: String,
     version: Version,
     state: InstallState,
+}
+
+impl Package {
+    /// Provide a package from its toml metadata
+    pub fn from_toml(data: &str) -> Result<Self, MixError> {
+        let metadata = match data.parse::<toml::Value>() {
+            Ok(toml::Value::Table(metadata)) => metadata,
+            Ok(value) => return Err(MixError::InvalidManifestError(value)),
+            Err(error) => return Err(MixError::ManifestParseError(error)),
+        };
+        let name = if let toml::Value::String(name) = metadata["name"].clone() {
+            name
+        } else {
+            return Err(MixError::InvalidManifestError(metadata["name"].clone()));
+        };
+        let version = Version::Unknown;
+        Ok(Package {
+            name,
+            version,
+            state: InstallState::Uninstalled,
+        })
+    }
 }
 
 impl std::fmt::Display for Package {
@@ -45,6 +70,11 @@ impl Database {
         None
     }
 
+    /// Add the given package to the database.
+    pub fn add_package(&mut self, package: Package) {
+        self.packages.push(package)
+    }
+
     /// Load the package database from disk.
     pub fn load(path: &Path) -> Result<Self, MixError> {
         let file = match File::open(path) {
@@ -76,7 +106,18 @@ impl Actionable for Database {
                 println!("Installing {}", package_name);
                 package.state = InstallState::Manual;
             } else {
-                return Err(MixError::PackageNotFound);
+                let package = match fs::read_to_string(package_name) {
+                    Ok(package) => package,
+                    // FIXME: Should do appropriate PackageNotFound
+                    Err(error) => return Err(error.into()),
+                };
+                let package = Package::from_toml(&package)?;
+                if self.get_package(&package.name).is_some() {
+                    // TODO: Should most likely overwrite the package, but this is simpler to do.
+                    println!("Warning: Skipping existing package {}.", &package.name);
+                    continue;
+                }
+                self.add_package(package);
             }
         }
         Ok(())

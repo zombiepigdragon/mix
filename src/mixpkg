@@ -137,7 +137,7 @@ EOF
 		shift
 		items=("$@")
 		for item in "${items[@]}"; do
-			printf '"%s", ' "$item"
+			printf '"%s", ' "${item//\"/\\\"}"
 		done
 		printf ']\n'
 	}

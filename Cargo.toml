@@ -10,6 +10,7 @@ description = "Install and maintain lemix packages."
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_cbor = "0.11.1"
+toml = "0.5.6"
 clap = "2.33.1"
 dialoguer = "0.6.2"
 indicatif = "0.15.0"

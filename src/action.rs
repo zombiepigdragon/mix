@@ -18,6 +18,14 @@ pub enum Action {
 }
 
 /// Implements behaviors corresponding to an `Action`.
+/// # Todo:
+/// This is the incorrect way to do this. A rewrite of the entire system is likely needed.
+/// I believe that these actions should likely return a set of categorized packages (not
+/// found/installed, actually possible to modify, not needed to modify) and then this should be
+/// used by a different trait to handle the real installation process. Thankfully, this isn't even
+/// close to production and I can skip implementing the real bad parts for a time because nobody
+/// will be using this. If this reaches production and this comment still exists, you are within
+/// your rights to panic.
 pub trait Actionable {
     /// Install the given packages to the system
     fn install(&mut self, packages: &[String]) -> Result<(), MixError>;

@@ -19,4 +19,10 @@ pub enum MixError {
     /// An error when serializing or deserializing.
     #[error(transparent)]
     SerializationError(#[from] serde_cbor::error::Error),
+    /// The manifest parsed successfully but contained invalid information.
+    #[error("Invalid manifest type {0}.")]
+    InvalidManifestError(toml::Value),
+    /// The manifest failed to parse.
+    #[error(transparent)]
+    ManifestParseError(#[from] toml::de::Error),
 }
