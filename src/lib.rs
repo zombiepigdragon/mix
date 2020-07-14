@@ -11,8 +11,6 @@
 #![warn(missing_docs)] // To keep codebase familiarity possible, docs are required
 /// The actions that can be performed, such as installing or removing packages.
 pub mod action;
-/// The processing of command line arguments.
-pub mod arguments;
 /// Errors that can be raised by the package manager.
 pub mod error;
 /// The packages database and structures.

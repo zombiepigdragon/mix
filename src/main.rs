@@ -19,7 +19,89 @@ struct Options {
 impl Options {
     /// Create a new Options from the environment.
     pub fn parse() -> Result<Options> {
-        let result = mix::arguments::parse_arguments(env::args());
+        use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version};
+        use clap::{AppSettings, Arg, SubCommand};
+        let result: clap::Result<Action> = {
+            let app = app_from_crate!()
+                .subcommand(
+                    SubCommand::with_name("install")
+                        .about("Installs a package")
+                        .arg(
+                            Arg::with_name("target")
+                                .help("The package(s) to install")
+                                .min_values(1)
+                                .required(true)
+                                .index(1),
+                        )
+                        .setting(AppSettings::ArgRequiredElseHelp)
+                        .visible_alias("in"),
+                )
+                .subcommand(
+                    SubCommand::with_name("remove")
+                        .about("Removes a package")
+                        .arg(
+                            Arg::with_name("target")
+                                .help("The package(s) to remove")
+                                .min_values(1)
+                                .required(true)
+                                .index(1),
+                        )
+                        .setting(AppSettings::ArgRequiredElseHelp)
+                        .visible_alias("re"),
+                )
+                .subcommand(
+                    SubCommand::with_name("synchronize")
+                        .about("Synchronizes the package database")
+                        .visible_alias("sy"),
+                )
+                .subcommand(
+                    SubCommand::with_name("update")
+                        .about("Updates a package")
+                        .arg(
+                            Arg::with_name("target")
+                                .help("The packages to update")
+                                .min_values(1)
+                                .index(1),
+                        )
+                        .visible_alias("up"),
+                )
+                .subcommand(
+                    SubCommand::with_name("fetch")
+                        .about("Downloads a package without installing it")
+                        .arg(
+                            Arg::with_name("target")
+                                .help("The package(s) to fetch")
+                                .min_values(1)
+                                .required(true)
+                                .index(1),
+                        )
+                        .setting(AppSettings::ArgRequiredElseHelp)
+                        .visible_alias("fe"),
+                )
+                .subcommand(
+                    SubCommand::with_name("list")
+                        .about("Lists the installed packages")
+                        .visible_alias("li"),
+                )
+                .setting(AppSettings::SubcommandRequiredElseHelp);
+
+            let matches = app.get_matches_safe()?;
+
+            let (subcommand_name, subcommand_arguments) = matches.subcommand();
+            Ok(Action::new(
+                subcommand_name,
+                &match subcommand_arguments {
+                    Some(values) => {
+                        if let Some(packages) = values.values_of("target") {
+                            Some(packages.map(String::from).collect())
+                        } else {
+                            None
+                        }
+                    }
+                    None => None,
+                },
+            ))
+        };
         let action = match result {
             Ok(action) => Ok(action),
             Err(error) => match error.kind {
