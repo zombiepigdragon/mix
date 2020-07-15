@@ -1,5 +1,5 @@
-use crate::action::Actionable;
 use crate::error::MixError;
+use crate::operation::Actionable;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::{
@@ -53,21 +53,19 @@ pub struct Database {
 impl Database {
     /// Given the name of a package, provide the package itself.
     pub fn get_package(&self, package_name: &str) -> Option<&Package> {
-        for package in &self.packages {
-            if package.name == package_name {
-                return Some(package);
-            }
-        }
-        None
+        self.iter().find(|package| package.name == package_name)
     }
+
     /// Given the name of a package, provide the package itself.
     pub fn get_mut_package(&mut self, package_name: &str) -> Option<&mut Package> {
-        for package in &mut self.packages {
-            if package.name == package_name {
-                return Some(package);
-            }
-        }
-        None
+        self.packages
+            .iter_mut()
+            .find(|package| package.name == package_name)
+    }
+
+    /// Provide an iterator over the values of the database.
+    pub fn iter(&self) -> std::slice::Iter<Package> {
+        self.packages.iter()
     }
 
     /// Add the given package to the database.
@@ -135,10 +133,7 @@ impl Actionable for Database {
         Ok(())
     }
 
-    fn synchronize(
-        &mut self,
-        next_action: &Option<Box<crate::action::Action>>,
-    ) -> Result<(), MixError> {
+    fn synchronize(&mut self) -> Result<(), MixError> {
         let default_packages = vec![
             "bash",
             "bzip2",
@@ -176,9 +171,6 @@ impl Actionable for Database {
                     state: InstallState::Uninstalled,
                 });
             }
-        }
-        if let Some(action) = next_action {
-            action.execute(self)?;
         }
         Ok(())
     }

@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Result};
-use mix::action::Action;
 use mix::error::MixError;
+use mix::operation::Operation;
 use mix::package::Database;
 
 use std::env;
@@ -12,7 +12,7 @@ use std::{
 /// The options to use throughout the application. These should be set by arguments.
 #[derive(Debug)]
 struct Options {
-    action: Action,
+    operation: Operation,
     database_path: PathBuf,
 }
 
@@ -21,7 +21,7 @@ impl Options {
     pub fn parse() -> Result<Options> {
         use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version};
         use clap::{AppSettings, Arg, SubCommand};
-        let result: clap::Result<Action> = {
+        let result: clap::Result<Operation> = {
             let app = app_from_crate!()
                 .subcommand(
                     SubCommand::with_name("install")
@@ -88,7 +88,7 @@ impl Options {
             let matches = app.get_matches_safe()?;
 
             let (subcommand_name, subcommand_arguments) = matches.subcommand();
-            Ok(Action::new(
+            Ok(Operation::new(
                 subcommand_name,
                 &match subcommand_arguments {
                     Some(values) => {
@@ -102,8 +102,8 @@ impl Options {
                 },
             ))
         };
-        let action = match result {
-            Ok(action) => Ok(action),
+        let operation = match result {
+            Ok(operation) => Ok(operation),
             Err(error) => match error.kind {
                 clap::ErrorKind::MissingArgumentOrSubcommand => {
                     println!("{}", error);
@@ -117,7 +117,7 @@ impl Options {
             },
         }?;
         Ok(Options {
-            action,
+            operation,
             database_path: ".mix.db".into(),
         })
     }
@@ -172,7 +172,7 @@ fn get_package_database(database_path: &Path) -> Database {
 fn main() -> Result<()> {
     let options = Options::parse().context("Failed to parse arguments.")?;
     let mut database = get_package_database(&options.database_path);
-    options.action.execute(&mut database)?;
+    options.operation.execute(&mut database)?;
     database
         .save(&options.database_path)
         .context("Failed to save database.")?;

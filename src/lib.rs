@@ -9,9 +9,11 @@
 //! Creates a dummy repository in the current directory, which can be operated on but does NOT affect packages.
 
 #![warn(missing_docs)] // To keep codebase familiarity possible, docs are required
-/// The actions that can be performed, such as installing or removing packages.
-pub mod action;
 /// Errors that can be raised by the package manager.
 pub mod error;
+/// The operations that can be performed, such as installing or removing packages.
+pub mod operation;
 /// The packages database and structures.
 pub mod package;
+/// Selecting packages from the database for operations.
+pub mod selection;
