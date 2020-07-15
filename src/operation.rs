@@ -1,5 +1,3 @@
-use crate::error::MixError;
-
 /// An action that can be performed by the package database.
 #[derive(Debug, PartialEq)]
 pub enum Operation {
@@ -17,26 +15,11 @@ pub enum Operation {
     List,
 }
 
-/// Implements behaviors corresponding to an `Operation`.
-/// # Todo:
-/// Remove.
-pub trait Actionable {
-    /// Install the given packages to the system
-    fn install(&mut self, packages: &[String]) -> Result<(), MixError>;
-    /// Remove the given packages from the system
-    fn remove(&mut self, packages: &[String]) -> Result<(), MixError>;
-    /// Bring the local package cache in sync with the remote cache
-    fn synchronize(&mut self) -> Result<(), MixError>;
-    /// Bring the given packages to the newest version, defaulting to every installed package
-    fn update(&mut self, packages: &Option<Vec<String>>) -> Result<(), MixError>;
-    /// Get the files of the given packages
-    fn fetch(&self, packages: &[String]) -> Result<(), MixError>;
-    /// List the packages currently installed
-    fn list(&self) -> Result<(), MixError>;
-}
-
 impl Operation {
     /// Create a new `Operation` from the command provided.
+    /// # Todo:
+    /// It would make sense to use the type system for this, and it looks like clap 3 can do that.
+    /// If it's possible, it would be nice to use that technique.
     /// # Panics:
     /// This will `panic!()` when there is an unrecognized subcommand or unexpected presence of packages.
     /// This should never happen, because `mix::arguments::parse_arguments` should be able to error on invalid subcommands.
@@ -56,18 +39,6 @@ impl Operation {
             "update" => Self::Update(Some(packages)),
             "fetch" => Self::Fetch(packages),
             _ => unimplemented!("The subcommand {} is not known.", subcommand),
-        }
-    }
-
-    /// Calls the corresponding method on the given `Actionable`.
-    pub fn execute<T: Actionable>(&self, executor: &mut T) -> Result<(), MixError> {
-        match self {
-            Operation::Install(packages) => executor.install(packages),
-            Operation::Remove(packages) => executor.remove(packages),
-            Operation::Synchronize => executor.synchronize(),
-            Operation::Update(packages) => executor.update(packages),
-            Operation::Fetch(packages) => executor.fetch(packages),
-            Operation::List => executor.list(),
         }
     }
 }

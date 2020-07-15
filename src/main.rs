@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
+use mix::database::Database;
 use mix::error::MixError;
 use mix::operation::Operation;
-use mix::package::Database;
 
 use std::env;
 use std::{
@@ -172,7 +172,7 @@ fn get_package_database(database_path: &Path) -> Database {
 fn main() -> Result<()> {
     let options = Options::parse().context("Failed to parse arguments.")?;
     let mut database = get_package_database(&options.database_path);
-    options.operation.execute(&mut database)?;
+    println!("{:#?}", options.operation);
     database
         .save(&options.database_path)
         .context("Failed to save database.")?;

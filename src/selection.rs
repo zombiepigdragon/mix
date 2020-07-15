@@ -1,4 +1,5 @@
-use crate::package::{Database, Package};
+use crate::database::Database;
+use crate::package::Package;
 
 /// The results of selecting a set of packages.
 pub enum SelectResults<'a> {

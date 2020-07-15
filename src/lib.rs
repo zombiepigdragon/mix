@@ -9,6 +9,9 @@
 //! Creates a dummy repository in the current directory, which can be operated on but does NOT affect packages.
 
 #![warn(missing_docs)] // To keep codebase familiarity possible, docs are required
+/// The package database. All functionality with storing the available packages
+/// and the state of the installed packages is here.
+pub mod database;
 /// Errors that can be raised by the package manager.
 pub mod error;
 /// The operations that can be performed, such as installing or removing packages.
