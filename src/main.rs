@@ -1,14 +1,16 @@
 use anyhow::{anyhow, Context, Result};
+use indicatif::*;
 use mix::database::Database;
 use mix::error::MixError;
 use mix::{operation::Operation, package::Package, selection::SelectResults};
-use std::{cell::RefCell, rc::Rc};
 
 use std::{
+    cell::RefCell,
     env,
     fs::File,
     path::{Path, PathBuf},
     process,
+    rc::Rc,
 };
 
 /// The options to use throughout the application. These should be set by arguments.
@@ -182,10 +184,21 @@ fn confirm_action(verb: &str, packages: &[Rc<RefCell<Package>>]) -> Result<bool>
         .context("Failed to display prompt!")
 }
 
+/// Prepare the progress bar for usage in mix operations.
+fn enable_progress_bar(bar: &ProgressBar, verb: &str, packages_count: usize) {
+    bar.set_length(packages_count as u64);
+    bar.set_prefix(verb);
+    bar.enable_steady_tick(20);
+}
+
 /// The entry point of the application.
 fn main() -> Result<()> {
     let options = Options::parse().context("Failed to parse arguments.")?;
     let mut database = get_package_database(&options.database_path);
+    let bar = ProgressBar::new(0).with_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner} {pos}/{len} {prefix} {msg} {percent}% {wide_bar} {eta}"),
+    );
     match options.operation {
         Operation::Install(packages) => {
             let packages = match mix::selection::packages_from_names(
@@ -196,9 +209,12 @@ fn main() -> Result<()> {
                 SelectResults::NotFound(_) => todo!(),
             };
             if confirm_action("install", &packages)? {
+                enable_progress_bar(&bar, "install", packages.len());
                 for package in packages {
+                    bar.set_message(&package.borrow().name);
                     package.borrow_mut().mark_as_manually_installed();
                     package.borrow_mut().install();
+                    bar.inc(1);
                 }
             } else {
                 println!("Aborting.")
@@ -213,8 +229,11 @@ fn main() -> Result<()> {
                 SelectResults::NotFound(_) => todo!(),
             };
             if confirm_action("remove", &packages)? {
+                enable_progress_bar(&bar, "remove", packages.len());
                 for package in packages {
+                    bar.set_message(&package.borrow().name);
                     package.borrow_mut().remove();
+                    bar.inc(1);
                 }
             } else {
                 println!("Aborting.")
@@ -241,6 +260,7 @@ fn main() -> Result<()> {
                 }
             };
             if confirm_action("update", &packages)? {
+                enable_progress_bar(&bar, "update", packages.len());
                 for package in packages {
                     package.borrow_mut().update();
                 }
@@ -257,11 +277,15 @@ fn main() -> Result<()> {
                 SelectResults::NotFound(_) => todo!(),
             };
             let client = reqwest::blocking::Client::new();
+            enable_progress_bar(&bar, "fetch", packages.len());
             for package in packages {
-                let mut file = File::create(format!("./{}.PKGBUILD", package.borrow().name))?;
+                let filename = format!("./{}.PKGBUILD", package.borrow().name);
+                let mut file = File::create(&filename)?;
+                bar.set_message(&filename);
                 package
                     .borrow()
                     .fetch(&client, "https://www.example.com", &mut file)?;
+                bar.inc(1);
             }
         }
         Operation::List => {
@@ -270,6 +294,9 @@ fn main() -> Result<()> {
             }
         }
     }
+    bar.set_style(ProgressStyle::default_spinner().template("Finished in {elapsed}."));
+    bar.disable_steady_tick();
+    bar.finish();
     database
         .save(&options.database_path)
         .context("Failed to save database.")?;
