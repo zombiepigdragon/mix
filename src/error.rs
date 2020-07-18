@@ -13,7 +13,7 @@ pub enum MixError {
     /// The requested file was not found.
     #[error("File not found: {0}")]
     FileNotFound(PathBuf),
-    /// An IOError that does not recieve special treatment occurred.
+    /// An IOError that does not receive special treatment occurred.
     #[error(transparent)]
     IOError(#[from] std::io::Error),
     /// An error when serializing or deserializing.
@@ -28,4 +28,7 @@ pub enum MixError {
     /// There was an error with a web request.
     #[error(transparent)]
     RequestError(#[from] reqwest::Error),
+    /// The user chose not to follow through with the operation.
+    #[error("Aborting.")]
+    Aborted,
 }

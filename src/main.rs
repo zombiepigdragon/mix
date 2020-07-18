@@ -2,15 +2,12 @@ use anyhow::{anyhow, Context, Result};
 use indicatif::*;
 use mix::database::Database;
 use mix::error::MixError;
-use mix::{operation::Operation, package::Package, selection::SelectResults};
+use mix::operation::Operation;
 
 use std::{
-    cell::RefCell,
     env,
-    fs::File,
     path::{Path, PathBuf},
     process,
-    rc::Rc,
 };
 
 /// The options to use throughout the application. These should be set by arguments.
@@ -173,10 +170,10 @@ fn get_package_database(database_path: &Path) -> Database {
 }
 
 /// Ask the user to confirm if they wish to perform the action about to be executed.
-fn confirm_action(verb: &str, packages: &[Rc<RefCell<Package>>]) -> Result<bool> {
+fn confirm_action(verb: &str, package_names: &[&str]) -> Result<bool> {
     println!("This action will {} the following packages:", verb);
-    for package in packages {
-        println!("\t{}", package.borrow().name);
+    for package_name in package_names {
+        println!("\t{}", package_name);
     }
     dialoguer::Confirm::new()
         .with_prompt(format!("Do you want to {} these packages?", verb))
@@ -188,6 +185,7 @@ fn confirm_action(verb: &str, packages: &[Rc<RefCell<Package>>]) -> Result<bool>
 fn enable_progress_bar(bar: &ProgressBar, verb: &str, packages_count: usize) {
     bar.set_length(packages_count as u64);
     bar.set_prefix(verb);
+    bar.reset_elapsed();
     bar.enable_steady_tick(20);
 }
 
@@ -199,101 +197,45 @@ fn main() -> Result<()> {
         ProgressStyle::default_spinner()
             .template("{spinner} {pos}/{len} {prefix} {msg} {percent}% {wide_bar} {eta}"),
     );
-    match options.operation {
-        Operation::Install(packages) => {
-            let packages = match mix::selection::packages_from_names(
-                &packages.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..],
-                &mut database,
-            ) {
-                SelectResults::Results(packages) => packages,
-                SelectResults::NotFound(_) => todo!(),
-            };
-            if confirm_action("install", &packages)? {
-                enable_progress_bar(&bar, "install", packages.len());
-                for package in packages {
-                    bar.set_message(&package.borrow().name);
-                    package.borrow_mut().mark_as_manually_installed();
-                    package.borrow_mut().install();
-                    bar.inc(1);
-                }
-            } else {
-                println!("Aborting.")
-            }
-        }
-        Operation::Remove(packages) => {
-            let packages = match mix::selection::packages_from_names(
-                &packages.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..],
-                &mut database,
-            ) {
-                SelectResults::Results(packages) => packages,
-                SelectResults::NotFound(_) => todo!(),
-            };
-            if confirm_action("remove", &packages)? {
-                enable_progress_bar(&bar, "remove", packages.len());
-                for package in packages {
-                    bar.set_message(&package.borrow().name);
-                    package.borrow_mut().remove();
-                    bar.inc(1);
-                }
-            } else {
-                println!("Aborting.")
-            }
-        }
-        Operation::Synchronize => todo!(),
-        Operation::Update(packages) => {
-            let packages = match packages {
-                Some(packages) => match mix::selection::packages_from_names(
-                    &packages.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..],
-                    &mut database,
-                ) {
-                    SelectResults::Results(packages) => packages,
-                    SelectResults::NotFound(_) => todo!(),
-                },
-                None => {
-                    if let SelectResults::Results(packages) =
-                        mix::selection::all_packages(&mut database)
-                    {
-                        packages
-                    } else {
-                        unreachable!()
+    database.handle_operation(
+        &options.operation,
+        || {
+            let (verb, package_names) = match &options.operation {
+                Operation::Install(packages) => ("install", packages),
+                Operation::Remove(packages) => ("remove", packages),
+                // Don't verify for a manual synchronization
+                Operation::Synchronize => return Ok(true),
+                Operation::Update(packages) => {
+                    match packages {
+                        Some(packages) => ("update", packages),
+                        // Don't verify all package updating
+                        // TODO: This should be verified.
+                        None => return Ok(true),
                     }
                 }
+                // Don't verify a fetch.
+                Operation::Fetch(_) => return Ok(true),
+                // Don't verify a list.
+                Operation::List => return Ok(true),
             };
-            if confirm_action("update", &packages)? {
-                enable_progress_bar(&bar, "update", packages.len());
-                for package in packages {
-                    package.borrow_mut().update();
-                }
-            } else {
-                println!("Aborting.")
-            }
-        }
-        Operation::Fetch(packages) => {
-            let packages = match mix::selection::packages_from_names(
-                &packages.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..],
-                &mut database,
+            match confirm_action(
+                verb,
+                &package_names.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..],
             ) {
-                SelectResults::Results(packages) => packages,
-                SelectResults::NotFound(_) => todo!(),
-            };
-            let client = reqwest::blocking::Client::new();
-            enable_progress_bar(&bar, "fetch", packages.len());
-            for package in packages {
-                let filename = format!("./{}.PKGBUILD", package.borrow().name);
-                let mut file = File::create(&filename)?;
-                bar.set_message(&filename);
-                package
-                    .borrow()
-                    .fetch(&client, "https://www.example.com", &mut file)?;
-                bar.inc(1);
+                Ok(result) => Ok(result),
+                Err(error) => {
+                    eprintln!("Error: {:#?}", error);
+                    Err(MixError::Aborted)
+                }
             }
-        }
-        Operation::List => {
-            for package in database.iter() {
-                println!("{}", package.borrow());
-            }
-        }
-    }
+        },
+        |packages| enable_progress_bar(&bar, "TODO: Name this", packages.len()),
+        &mut |package| {
+            bar.inc(1);
+            bar.println(format!("{} {}", "Placeholder verb-ing", package.name));
+            bar.set_message(&package.name)
+        },
+    )?;
     bar.set_style(ProgressStyle::default_spinner().template("Finished in {elapsed}."));
     bar.disable_steady_tick();
     bar.finish();

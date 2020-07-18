@@ -1,8 +1,16 @@
-use crate::error::MixError;
-use crate::package::Package;
+use crate::{
+    error::MixError,
+    operation::Operation,
+    package::Package,
+    selection::{all_packages, packages_from_names, SelectResults},
+};
 use serde::{Deserialize, Serialize};
-use std::fs::File;
-use std::{cell::RefCell, path::Path, rc::Rc};
+use std::{
+    cell::{Ref, RefCell},
+    fs::File,
+    path::Path,
+    rc::Rc,
+};
 
 /// The package database. It provides all actions needed to manage packages.
 #[derive(Debug, Serialize, Deserialize)]
@@ -48,5 +56,108 @@ impl Database {
     /// Create an empty database. Should only be used on fresh installs.
     pub fn new_empty() -> Self {
         Self { packages: vec![] }
+    }
+
+    /// Handle the operation, using this database.
+    pub fn handle_operation(
+        &mut self,
+        operation: &Operation,
+        confirm: impl FnOnce() -> Result<bool, MixError>,
+        before_run: impl FnOnce(&Vec<Rc<RefCell<Package>>>),
+        update: &mut impl FnMut(Ref<Package>),
+    ) -> Result<(), MixError> {
+        match operation {
+            Operation::Install(packages) => {
+                let packages = match packages_from_names(
+                    &packages.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..],
+                    self,
+                ) {
+                    SelectResults::Results(packages) => packages,
+                    SelectResults::NotFound(_) => todo!(),
+                };
+                if confirm()? {
+                    before_run(&packages);
+                    for package in packages {
+                        update(package.borrow());
+                        package.borrow_mut().mark_as_manually_installed();
+                        package.borrow_mut().install();
+                    }
+                } else {
+                    return Ok(());
+                }
+            }
+            Operation::Remove(packages) => {
+                let packages = match packages_from_names(
+                    &packages.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..],
+                    self,
+                ) {
+                    SelectResults::Results(packages) => packages,
+                    SelectResults::NotFound(_) => todo!(),
+                };
+                if confirm()? {
+                    before_run(&packages);
+                    for package in packages {
+                        update(package.borrow());
+                        package.borrow_mut().remove();
+                    }
+                } else {
+                    println!("Aborting.")
+                }
+            }
+            Operation::Synchronize => todo!(),
+            Operation::Update(packages) => {
+                let packages = match packages {
+                    Some(packages) => match packages_from_names(
+                        &packages.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..],
+                        self,
+                    ) {
+                        SelectResults::Results(packages) => packages,
+                        SelectResults::NotFound(_) => todo!(),
+                    },
+                    None => {
+                        if let SelectResults::Results(packages) = all_packages(self) {
+                            packages
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                };
+                if confirm()? {
+                    before_run(&packages);
+                    for package in packages {
+                        update(package.borrow());
+                        package.borrow_mut().update();
+                    }
+                } else {
+                    return Err(MixError::Aborted);
+                }
+            }
+            Operation::Fetch(packages) => {
+                let packages = match packages_from_names(
+                    &packages.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..],
+                    self,
+                ) {
+                    SelectResults::Results(packages) => packages,
+                    SelectResults::NotFound(_) => todo!(),
+                };
+                let client = reqwest::blocking::Client::new();
+                before_run(&packages);
+                for package in packages {
+                    let filename = format!("./{}.PKGBUILD", package.borrow().name);
+                    let mut file = File::create(&filename)?;
+                    update(package.borrow());
+                    package
+                        .borrow()
+                        .fetch(&client, "https://www.example.com", &mut file)?;
+                }
+            }
+            // FIXME: Call the callbacks here.
+            Operation::List => {
+                for package in self.iter() {
+                    println!("{}", package.borrow());
+                }
+            }
+        }
+        Ok(())
     }
 }
