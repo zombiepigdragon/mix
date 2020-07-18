@@ -1,10 +1,12 @@
 use anyhow::{anyhow, Context, Result};
 use mix::database::Database;
 use mix::error::MixError;
-use mix::operation::Operation;
+use mix::{operation::Operation, package::Package, selection::SelectResults};
+use std::{cell::RefCell, rc::Rc};
 
-use std::env;
 use std::{
+    env,
+    fs::File,
     path::{Path, PathBuf},
     process,
 };
@@ -168,11 +170,106 @@ fn get_package_database(database_path: &Path) -> Database {
     }
 }
 
+/// Ask the user to confirm if they wish to perform the action about to be executed.
+fn confirm_action(verb: &str, packages: &[Rc<RefCell<Package>>]) -> Result<bool> {
+    println!("This action will {} the following packages:", verb);
+    for package in packages {
+        println!("\t{}", package.borrow().name);
+    }
+    dialoguer::Confirm::new()
+        .with_prompt(format!("Do you want to {} these packages?", verb))
+        .interact()
+        .context("Failed to display prompt!")
+}
+
 /// The entry point of the application.
 fn main() -> Result<()> {
     let options = Options::parse().context("Failed to parse arguments.")?;
     let mut database = get_package_database(&options.database_path);
-    println!("{:#?}", options.operation);
+    match options.operation {
+        Operation::Install(packages) => {
+            let packages = match mix::selection::packages_from_names(
+                &packages.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..],
+                &mut database,
+            ) {
+                SelectResults::Results(packages) => packages,
+                SelectResults::NotFound(_) => todo!(),
+            };
+            if confirm_action("install", &packages)? {
+                for package in packages {
+                    package.borrow_mut().mark_as_manually_installed();
+                    package.borrow_mut().install();
+                }
+            } else {
+                println!("Aborting.")
+            }
+        }
+        Operation::Remove(packages) => {
+            let packages = match mix::selection::packages_from_names(
+                &packages.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..],
+                &mut database,
+            ) {
+                SelectResults::Results(packages) => packages,
+                SelectResults::NotFound(_) => todo!(),
+            };
+            if confirm_action("remove", &packages)? {
+                for package in packages {
+                    package.borrow_mut().remove();
+                }
+            } else {
+                println!("Aborting.")
+            }
+        }
+        Operation::Synchronize => todo!(),
+        Operation::Update(packages) => {
+            let packages = match packages {
+                Some(packages) => match mix::selection::packages_from_names(
+                    &packages.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..],
+                    &mut database,
+                ) {
+                    SelectResults::Results(packages) => packages,
+                    SelectResults::NotFound(_) => todo!(),
+                },
+                None => {
+                    if let SelectResults::Results(packages) =
+                        mix::selection::all_packages(&mut database)
+                    {
+                        packages
+                    } else {
+                        unreachable!()
+                    }
+                }
+            };
+            if confirm_action("update", &packages)? {
+                for package in packages {
+                    package.borrow_mut().update();
+                }
+            } else {
+                println!("Aborting.")
+            }
+        }
+        Operation::Fetch(packages) => {
+            let packages = match mix::selection::packages_from_names(
+                &packages.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..],
+                &mut database,
+            ) {
+                SelectResults::Results(packages) => packages,
+                SelectResults::NotFound(_) => todo!(),
+            };
+            let client = reqwest::blocking::Client::new();
+            for package in packages {
+                let mut file = File::create(format!("./{}.PKGBUILD", package.borrow().name))?;
+                package
+                    .borrow()
+                    .fetch(&client, "https://www.example.com", &mut file)?;
+            }
+        }
+        Operation::List => {
+            for package in database.iter() {
+                println!("{}", package.borrow());
+            }
+        }
+    }
     database
         .save(&options.database_path)
         .context("Failed to save database.")?;

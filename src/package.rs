@@ -33,6 +33,43 @@ impl Package {
             state: InstallState::Uninstalled,
         })
     }
+
+    /// Mark the package as manually installed. This does *not* install it.
+    pub fn mark_as_manually_installed(&mut self) {
+        self.state = InstallState::Manual;
+    }
+
+    /// Install the package.
+    pub fn install(&mut self) {
+        todo!()
+    }
+
+    /// Remove the package.
+    pub fn remove(&mut self) {
+        self.state = InstallState::Uninstalled;
+        todo!()
+    }
+
+    /// Update the package.
+    pub fn update(&mut self) {
+        self.version = match self.version {
+            Version::SemVer(maj, min, rev) => Version::SemVer(maj + 1, min, rev),
+            Version::Unknown => Version::SemVer(1, 0, 0),
+        };
+        todo!()
+    }
+
+    /// Download the files for the package.
+    pub fn fetch(
+        &self,
+        client: &reqwest::blocking::Client,
+        url: &str,
+        file: &mut std::fs::File,
+    ) -> Result<(), MixError> {
+        let mut data = client.get(url).send()?;
+        data.copy_to(file)?;
+        Ok(())
+    }
 }
 
 impl std::fmt::Display for Package {

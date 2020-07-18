@@ -2,35 +2,29 @@ use crate::error::MixError;
 use crate::package::Package;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
-use std::path::Path;
+use std::{cell::RefCell, path::Path, rc::Rc};
 
 /// The package database. It provides all actions needed to manage packages.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Database {
-    packages: Vec<Package>,
+    packages: Vec<Rc<RefCell<Package>>>,
 }
 
 impl Database {
     /// Given the name of a package, provide the package itself.
-    pub fn get_package(&self, package_name: &str) -> Option<&Package> {
-        self.iter().find(|package| package.name == package_name)
-    }
-
-    /// Given the name of a package, provide the package itself.
-    pub fn get_mut_package(&mut self, package_name: &str) -> Option<&mut Package> {
-        self.packages
-            .iter_mut()
-            .find(|package| package.name == package_name)
+    pub fn get_package(&self, package_name: &str) -> Option<&Rc<RefCell<Package>>> {
+        self.iter()
+            .find(|package| package.borrow().name == package_name)
     }
 
     /// Provide an iterator over the values of the database.
-    pub fn iter(&self) -> std::slice::Iter<Package> {
+    pub fn iter(&self) -> std::slice::Iter<Rc<RefCell<Package>>> {
         self.packages.iter()
     }
 
     /// Add the given package to the database.
     pub fn add_package(&mut self, package: Package) {
-        self.packages.push(package)
+        self.packages.push(Rc::from(RefCell::from(package)))
     }
 
     /// Load the package database from disk.

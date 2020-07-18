@@ -25,4 +25,7 @@ pub enum MixError {
     /// The manifest failed to parse.
     #[error(transparent)]
     ManifestParseError(#[from] toml::de::Error),
+    /// There was an error with a web request.
+    #[error(transparent)]
+    RequestError(#[from] reqwest::Error),
 }
