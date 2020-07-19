@@ -2,7 +2,6 @@ use crate::{
     error::MixError,
     operation::Operation,
     package::Package,
-    selection::{all_packages, packages_from_names, SelectResults},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -68,13 +67,6 @@ impl Database {
     ) -> Result<(), MixError> {
         match operation {
             Operation::Install(packages) => {
-                let packages = match packages_from_names(
-                    &packages.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..],
-                    self,
-                ) {
-                    SelectResults::Results(packages) => packages,
-                    SelectResults::NotFound(_) => todo!(),
-                };
                 if confirm()? {
                     before_run(&packages);
                     for package in packages {
@@ -87,13 +79,6 @@ impl Database {
                 }
             }
             Operation::Remove(packages) => {
-                let packages = match packages_from_names(
-                    &packages.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..],
-                    self,
-                ) {
-                    SelectResults::Results(packages) => packages,
-                    SelectResults::NotFound(_) => todo!(),
-                };
                 if confirm()? {
                     before_run(&packages);
                     for package in packages {
@@ -107,20 +92,8 @@ impl Database {
             Operation::Synchronize => todo!(),
             Operation::Update(packages) => {
                 let packages = match packages {
-                    Some(packages) => match packages_from_names(
-                        &packages.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..],
-                        self,
-                    ) {
-                        SelectResults::Results(packages) => packages,
-                        SelectResults::NotFound(_) => todo!(),
-                    },
-                    None => {
-                        if let SelectResults::Results(packages) = all_packages(self) {
-                            packages
-                        } else {
-                            unreachable!()
-                        }
-                    }
+                    Some(packages) => packages.clone(),
+                    None => self.iter().cloned().collect(),
                 };
                 if confirm()? {
                     before_run(&packages);
@@ -133,13 +106,6 @@ impl Database {
                 }
             }
             Operation::Fetch(packages) => {
-                let packages = match packages_from_names(
-                    &packages.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..],
-                    self,
-                ) {
-                    SelectResults::Results(packages) => packages,
-                    SelectResults::NotFound(_) => todo!(),
-                };
                 let client = reqwest::blocking::Client::new();
                 before_run(&packages);
                 for package in packages {

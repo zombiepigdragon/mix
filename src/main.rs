@@ -1,13 +1,13 @@
 use anyhow::{anyhow, Context, Result};
 use indicatif::*;
-use mix::database::Database;
-use mix::error::MixError;
-use mix::operation::Operation;
+use mix::{database::Database, error::MixError, operation::Operation, package::Package};
 use structopt::StructOpt;
 
 use std::{
+    cell::RefCell,
     path::{Path, PathBuf},
     process,
+    rc::Rc,
 };
 
 #[derive(Debug, StructOpt)]
@@ -26,15 +26,39 @@ struct Options {
 }
 
 impl Options {
-    fn get_operation(&self) -> Operation {
-        match &self.command {
-            SubCommands::Install { targets } => Operation::Install(targets.clone()),
-            SubCommands::Remove { targets } => Operation::Remove(targets.clone()),
-            SubCommands::Update { targets } => Operation::Update(Some(targets.clone())),
-            SubCommands::Synchronize => Operation::Synchronize,
-            SubCommands::Fetch { targets } => Operation::Fetch(targets.clone()),
-            SubCommands::List => Operation::List,
+    fn packages_from_names(
+        package_names: &Vec<String>,
+        database: &mut Database,
+    ) -> Option<Vec<Rc<RefCell<Package>>>> {
+        let packages: Vec<Rc<RefCell<Package>>> = package_names
+            .iter()
+            .filter_map(|package_name| database.get_package(package_name))
+            .cloned()
+            .collect();
+        if packages.len() == package_names.len() {
+            Some(packages)
+        } else {
+            None
         }
+    }
+
+    fn get_operation(&self, database: &mut Database) -> Option<Operation> {
+        Some(match &self.command {
+            SubCommands::Install { targets } => {
+                Operation::Install(Self::packages_from_names(targets, database).unwrap())
+            }
+            SubCommands::Remove { targets } => {
+                Operation::Remove(Self::packages_from_names(targets, database).unwrap())
+            }
+            SubCommands::Update { targets } => {
+                Operation::Update(Self::packages_from_names(targets, database))
+            }
+            SubCommands::Synchronize => Operation::Synchronize,
+            SubCommands::Fetch { targets } => {
+                Operation::Fetch(Self::packages_from_names(targets, database).unwrap())
+            }
+            SubCommands::List => Operation::List,
+        })
     }
 }
 
@@ -122,10 +146,10 @@ fn get_package_database(database_path: &Path) -> Database {
 }
 
 /// Ask the user to confirm if they wish to perform the action about to be executed.
-fn confirm_action(verb: &str, package_names: &[&str]) -> Result<bool> {
+fn confirm_action(verb: &str, packages: &Vec<Rc<RefCell<Package>>>) -> Result<bool> {
     println!("This action will {} the following packages:", verb);
-    for package_name in package_names {
-        println!("\t{}", package_name);
+    for package in packages {
+        println!("\t{}", package.borrow().name);
     }
     dialoguer::Confirm::new()
         .with_prompt(format!("Do you want to {} these packages?", verb))
@@ -145,8 +169,8 @@ fn enable_progress_bar(bar: &ProgressBar, verb: &str, packages_count: usize) {
 fn main() -> Result<()> {
     //let options = Options::parse().context("Failed to parse arguments.")?;
     let options = Options::from_args();
-    let operation = options.get_operation();
     let mut database = get_package_database(&options.database);
+    let operation = options.get_operation(&mut database).unwrap();
     let bar = ProgressBar::new(0).with_style(
         ProgressStyle::default_spinner()
             .template("{spinner} {pos}/{len} {prefix} {msg} {percent}% {wide_bar} {eta}"),
@@ -154,7 +178,7 @@ fn main() -> Result<()> {
     database.handle_operation(
         &operation,
         || {
-            let (verb, package_names) = match &operation {
+            let (verb, packages) = match &operation {
                 Operation::Install(packages) => ("install", packages),
                 Operation::Remove(packages) => ("remove", packages),
                 // Don't verify for a manual synchronization
@@ -172,10 +196,7 @@ fn main() -> Result<()> {
                 // Don't verify a list.
                 Operation::List => return Ok(true),
             };
-            match confirm_action(
-                verb,
-                &package_names.iter().map(|s| &s[..]).collect::<Vec<&str>>()[..],
-            ) {
+            match confirm_action(verb, packages) {
                 Ok(result) => Ok(result),
                 Err(error) => {
                     eprintln!("Error: {:#?}", error);
