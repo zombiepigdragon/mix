@@ -3,125 +3,77 @@ use indicatif::*;
 use mix::database::Database;
 use mix::error::MixError;
 use mix::operation::Operation;
+use structopt::StructOpt;
 
 use std::{
-    env,
     path::{Path, PathBuf},
     process,
 };
 
-/// The options to use throughout the application. These should be set by arguments.
-#[derive(Debug)]
+#[derive(Debug, StructOpt)]
+#[structopt()]
 struct Options {
-    operation: Operation,
-    database_path: PathBuf,
+    /// The configuration file containing various system options.
+    #[structopt(short = "C", long, default_value = "mix.conf", parse(from_os_str))]
+    configuration: PathBuf,
+
+    /// The file containing the package database.
+    #[structopt(long, default_value = ".mix.db", parse(from_os_str))]
+    database: PathBuf,
+
+    #[structopt(subcommand)]
+    command: SubCommands,
 }
 
 impl Options {
-    /// Create a new Options from the environment.
-    pub fn parse() -> Result<Options> {
-        use clap::{app_from_crate, crate_authors, crate_description, crate_name, crate_version};
-        use clap::{AppSettings, Arg, SubCommand};
-        let result: clap::Result<Operation> = {
-            let app = app_from_crate!()
-                .subcommand(
-                    SubCommand::with_name("install")
-                        .about("Installs a package")
-                        .arg(
-                            Arg::with_name("target")
-                                .help("The package(s) to install")
-                                .min_values(1)
-                                .required(true)
-                                .index(1),
-                        )
-                        .setting(AppSettings::ArgRequiredElseHelp)
-                        .visible_alias("in"),
-                )
-                .subcommand(
-                    SubCommand::with_name("remove")
-                        .about("Removes a package")
-                        .arg(
-                            Arg::with_name("target")
-                                .help("The package(s) to remove")
-                                .min_values(1)
-                                .required(true)
-                                .index(1),
-                        )
-                        .setting(AppSettings::ArgRequiredElseHelp)
-                        .visible_alias("re"),
-                )
-                .subcommand(
-                    SubCommand::with_name("synchronize")
-                        .about("Synchronizes the package database")
-                        .visible_alias("sy"),
-                )
-                .subcommand(
-                    SubCommand::with_name("update")
-                        .about("Updates a package")
-                        .arg(
-                            Arg::with_name("target")
-                                .help("The packages to update")
-                                .min_values(1)
-                                .index(1),
-                        )
-                        .visible_alias("up"),
-                )
-                .subcommand(
-                    SubCommand::with_name("fetch")
-                        .about("Downloads a package without installing it")
-                        .arg(
-                            Arg::with_name("target")
-                                .help("The package(s) to fetch")
-                                .min_values(1)
-                                .required(true)
-                                .index(1),
-                        )
-                        .setting(AppSettings::ArgRequiredElseHelp)
-                        .visible_alias("fe"),
-                )
-                .subcommand(
-                    SubCommand::with_name("list")
-                        .about("Lists the installed packages")
-                        .visible_alias("li"),
-                )
-                .setting(AppSettings::SubcommandRequiredElseHelp);
-
-            let matches = app.get_matches_safe()?;
-
-            let (subcommand_name, subcommand_arguments) = matches.subcommand();
-            Ok(Operation::new(
-                subcommand_name,
-                &match subcommand_arguments {
-                    Some(values) => {
-                        if let Some(packages) = values.values_of("target") {
-                            Some(packages.map(String::from).collect())
-                        } else {
-                            None
-                        }
-                    }
-                    None => None,
-                },
-            ))
-        };
-        let operation = match result {
-            Ok(operation) => Ok(operation),
-            Err(error) => match error.kind {
-                clap::ErrorKind::MissingArgumentOrSubcommand => {
-                    println!("{}", error);
-                    process::exit(1);
-                }
-                clap::ErrorKind::HelpDisplayed | clap::ErrorKind::VersionDisplayed => {
-                    println!("{}", error);
-                    process::exit(0);
-                }
-                _ => Err(error),
-            },
-        }?;
-        Ok(Options {
-            operation,
-            database_path: ".mix.db".into(),
-        })
+    fn get_operation(&self) -> Operation {
+        match &self.command {
+            SubCommands::Install { targets } => Operation::Install(targets.clone()),
+            SubCommands::Remove { targets } => Operation::Remove(targets.clone()),
+            SubCommands::Update { targets } => Operation::Update(Some(targets.clone())),
+            SubCommands::Synchronize => Operation::Synchronize,
+            SubCommands::Fetch { targets } => Operation::Fetch(targets.clone()),
+            SubCommands::List => Operation::List,
+        }
     }
+}
+
+#[derive(Debug, StructOpt)]
+enum SubCommands {
+    /// Install the given packages.
+    #[structopt(alias = "in")]
+    Install {
+        #[structopt()]
+        /// The packages to install.
+        targets: Vec<String>,
+    },
+    /// Remove the given packages.
+    #[structopt(alias = "re")]
+    Remove {
+        #[structopt()]
+        /// The packages to uninstall.
+        targets: Vec<String>,
+    },
+    /// Update the given packages, or every out of date package if no arguments are given.
+    #[structopt(alias = "up")]
+    Update {
+        #[structopt()]
+        /// The packages to update (defaults to every package)
+        targets: Vec<String>,
+    },
+    /// Bring the package database up to date.
+    #[structopt(alias = "sy")]
+    Synchronize,
+    /// Download the files of the given packages.
+    #[structopt(alias = "fe")]
+    Fetch {
+        #[structopt()]
+        /// The packages to download.
+        targets: Vec<String>,
+    },
+    /// List every known package.
+    #[structopt(alias = "li")]
+    List,
 }
 
 /// When there is no database found, prompt to create a new database.
@@ -191,16 +143,18 @@ fn enable_progress_bar(bar: &ProgressBar, verb: &str, packages_count: usize) {
 
 /// The entry point of the application.
 fn main() -> Result<()> {
-    let options = Options::parse().context("Failed to parse arguments.")?;
-    let mut database = get_package_database(&options.database_path);
+    //let options = Options::parse().context("Failed to parse arguments.")?;
+    let options = Options::from_args();
+    let operation = options.get_operation();
+    let mut database = get_package_database(&options.database);
     let bar = ProgressBar::new(0).with_style(
         ProgressStyle::default_spinner()
             .template("{spinner} {pos}/{len} {prefix} {msg} {percent}% {wide_bar} {eta}"),
     );
     database.handle_operation(
-        &options.operation,
+        &operation,
         || {
-            let (verb, package_names) = match &options.operation {
+            let (verb, package_names) = match &operation {
                 Operation::Install(packages) => ("install", packages),
                 Operation::Remove(packages) => ("remove", packages),
                 // Don't verify for a manual synchronization
@@ -240,7 +194,7 @@ fn main() -> Result<()> {
     bar.disable_steady_tick();
     bar.finish();
     database
-        .save(&options.database_path)
+        .save(&options.database)
         .context("Failed to save database.")?;
     Ok(())
 }
