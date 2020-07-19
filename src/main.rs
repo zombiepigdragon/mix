@@ -33,7 +33,6 @@ impl Options {
         let packages: Vec<Rc<RefCell<Package>>> = package_names
             .iter()
             .filter_map(|package_name| database.get_package(package_name))
-            .cloned()
             .collect();
         if packages.len() == package_names.len() {
             Some(packages)

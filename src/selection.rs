@@ -18,7 +18,7 @@ pub fn packages_from_names(package_names: &[&str], database: &mut Database) -> S
         .iter()
         .map(|package_name| match database.get_package(package_name) {
             Some(package) => {
-                packages_found.push(package.clone());
+                packages_found.push(package);
             }
             None => {
                 packages_not_found.push(String::from(*package_name));
@@ -33,5 +33,5 @@ pub fn packages_from_names(package_names: &[&str], database: &mut Database) -> S
 
 /// Gets every package in the database.
 pub fn all_packages(database: &mut Database) -> SelectResults {
-    SelectResults::Results(database.iter().cloned().collect())
+    SelectResults::Results(database.iter().collect())
 }

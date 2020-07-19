@@ -1,8 +1,4 @@
-use crate::{
-    error::MixError,
-    operation::Operation,
-    package::Package,
-};
+use crate::{error::MixError, operation::Operation, package::Package};
 use serde::{Deserialize, Serialize};
 use std::{
     cell::{Ref, RefCell},
@@ -19,14 +15,14 @@ pub struct Database {
 
 impl Database {
     /// Given the name of a package, provide the package itself.
-    pub fn get_package(&self, package_name: &str) -> Option<&Rc<RefCell<Package>>> {
+    pub fn get_package(&self, package_name: &str) -> Option<Rc<RefCell<Package>>> {
         self.iter()
             .find(|package| package.borrow().name == package_name)
     }
 
     /// Provide an iterator over the values of the database.
-    pub fn iter(&self) -> std::slice::Iter<Rc<RefCell<Package>>> {
-        self.packages.iter()
+    pub fn iter(&self) -> impl Iterator<Item = Rc<RefCell<Package>>> + '_ {
+        self.packages.iter().cloned()
     }
 
     /// Add the given package to the database.
@@ -93,7 +89,7 @@ impl Database {
             Operation::Update(packages) => {
                 let packages = match packages {
                     Some(packages) => packages.clone(),
-                    None => self.iter().cloned().collect(),
+                    None => self.iter().collect(),
                 };
                 if confirm()? {
                     before_run(&packages);
