@@ -1,5 +1,7 @@
 use crate::error::MixError;
 use serde::{Deserialize, Serialize};
+use std::{ffi::OsString, io::Read};
+use xz2::read::XzDecoder;
 
 /// A singular package. A package is a name, list of files, and some metadata.
 /// The metadata is what allows retrieving a package, viewing the files of a package, and many similar actions.
@@ -32,6 +34,30 @@ impl Package {
             version,
             state: InstallState::Uninstalled,
         })
+    }
+
+    /// Provide a package from a tarball
+    pub fn from_tarball(file: impl Read) -> Result<Self, MixError> {
+        let file = XzDecoder::new(file);
+        let mut archive = tar::Archive::new(file);
+        let mut entries = archive.entries()?;
+        let manifest = loop {
+            match entries.next() {
+                Some(entry) => {
+                    let entry = entry?;
+                    if entry.path()? == OsString::from(".MANIFEST") {
+                        break Some(entry);
+                    }
+                }
+                None => break None,
+            }
+        };
+        if manifest.is_none() {
+            return Err(MixError::InvalidPackageError);
+        }
+        let mut buf = String::new();
+        manifest.unwrap().read_to_string(&mut buf)?;
+        Self::from_toml(&buf)
     }
 
     /// Mark the package as manually installed. This does *not* install it.

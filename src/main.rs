@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use indicatif::*;
-use mix::{database::Database, error::MixError, operation::Operation, package::Package};
+use mix::{database::Database, error::MixError, operation::Operation, package::Package, selection};
 use structopt::StructOpt;
 
 use std::{
@@ -26,35 +26,84 @@ struct Options {
 }
 
 impl Options {
-    fn packages_from_names(
-        package_names: &Vec<String>,
-        database: &mut Database,
-    ) -> Option<Vec<Rc<RefCell<Package>>>> {
-        let packages: Vec<Rc<RefCell<Package>>> = package_names
-            .iter()
-            .filter_map(|package_name| database.get_package(package_name))
-            .collect();
-        if packages.len() == package_names.len() {
-            Some(packages)
-        } else {
-            None
-        }
-    }
-
-    fn get_operation(&self, database: &mut Database) -> Option<Operation> {
-        Some(match &self.command {
+    fn get_operation(&self, database: &mut Database) -> Result<Operation> {
+        Ok(match &self.command {
             SubCommands::Install { targets } => {
-                Operation::Install(Self::packages_from_names(targets, database).unwrap())
+                let targets = selection::packages_from_names(
+                    &targets.iter().map(String::as_str).collect::<Vec<_>>()[..],
+                    database,
+                );
+                let targets = match targets {
+                    selection::SelectResults::Results(targets) => targets,
+                    selection::SelectResults::NotFound(missing, mut found) => {
+                        let mut truly_missing = vec![];
+                        for package_name in missing {
+                            match std::fs::File::open(&package_name) {
+                                Ok(file) => {
+                                    let package = Package::from_tarball(file)?;
+                                    found.push(Rc::new(RefCell::new(package)));
+                                }
+                                Err(error) => match error.kind() {
+                                    std::io::ErrorKind::NotFound => {
+                                        truly_missing.push(package_name);
+                                    }
+                                    _ => {
+                                        return Err(error)
+                                            .context("Failed to read package as file.")
+                                    }
+                                },
+                            }
+                        }
+                        if !truly_missing.is_empty() {
+                            return Err(anyhow!("Failed to find packages {:?}", truly_missing));
+                        }
+                        found
+                    }
+                };
+                Operation::Install(targets)
             }
             SubCommands::Remove { targets } => {
-                Operation::Remove(Self::packages_from_names(targets, database).unwrap())
+                let targets = selection::packages_from_names(
+                    &targets.iter().map(String::as_str).collect::<Vec<_>>()[..],
+                    database,
+                );
+                let targets = match targets {
+                    selection::SelectResults::Results(targets) => targets,
+                    selection::SelectResults::NotFound(_, missing) => {
+                        return Err(anyhow!("Failed to find packages {:?}", missing));
+                    }
+                };
+                Operation::Remove(targets)
             }
             SubCommands::Update { targets } => {
-                Operation::Update(Self::packages_from_names(targets, database))
+                if targets.is_empty() {
+                    return Ok(Operation::Update(None));
+                }
+                let targets = selection::packages_from_names(
+                    &targets.iter().map(String::as_str).collect::<Vec<_>>()[..],
+                    database,
+                );
+                let targets = match targets {
+                    selection::SelectResults::Results(targets) => targets,
+                    selection::SelectResults::NotFound(_, missing) => {
+                        return Err(anyhow!("Failed to find packages {:?}", missing));
+                    }
+                };
+                Operation::Update(Some(targets))
             }
             SubCommands::Sync => Operation::Synchronize,
             SubCommands::Fetch { targets } => {
-                Operation::Fetch(Self::packages_from_names(targets, database).unwrap())
+                let targets = selection::packages_from_names(
+                    &targets.iter().map(String::as_str).collect::<Vec<_>>()[..],
+                    database,
+                );
+                let targets = match targets {
+                    selection::SelectResults::Results(targets) => targets,
+                    selection::SelectResults::NotFound(_, missing) => {
+                        return Err(anyhow!("Failed to find packages {:?}", missing));
+                    }
+                };
+                Operation::Fetch(targets)
             }
             SubCommands::List => Operation::List,
         })
@@ -145,7 +194,7 @@ fn get_package_database(database_path: &Path) -> Database {
 }
 
 /// Ask the user to confirm if they wish to perform the action about to be executed.
-fn confirm_action(verb: &str, packages: &Vec<Rc<RefCell<Package>>>) -> Result<bool> {
+fn confirm_action(verb: &str, packages: &[Rc<RefCell<Package>>]) -> Result<bool> {
     println!("This action will {} the following packages:", verb);
     for package in packages {
         println!("\t{}", package.borrow().name);
@@ -166,10 +215,9 @@ fn enable_progress_bar(bar: &ProgressBar, verb: &str, packages_count: usize) {
 
 /// The entry point of the application.
 fn main() -> Result<()> {
-    //let options = Options::parse().context("Failed to parse arguments.")?;
     let options = Options::from_args();
     let mut database = get_package_database(&options.database);
-    let operation = options.get_operation(&mut database).unwrap();
+    let operation = options.get_operation(&mut database)?;
     let bar = ProgressBar::new(0).with_style(
         ProgressStyle::default_spinner()
             .template("{spinner} {pos}/{len} {prefix} {msg} {percent}% {wide_bar} {eta}"),

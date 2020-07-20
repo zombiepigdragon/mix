@@ -15,19 +15,20 @@ pub struct Database {
 
 impl Database {
     /// Given the name of a package, provide the package itself.
-    pub fn get_package(&self, package_name: &str) -> Option<Rc<RefCell<Package>>> {
+    pub(crate) fn get_package(&self, package_name: &str) -> Option<Rc<RefCell<Package>>> {
         self.iter()
             .find(|package| package.borrow().name == package_name)
     }
-
     /// Provide an iterator over the values of the database.
-    pub fn iter(&self) -> impl Iterator<Item = Rc<RefCell<Package>>> + '_ {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = Rc<RefCell<Package>>> + '_ {
         self.packages.iter().cloned()
     }
 
     /// Add the given package to the database.
-    pub fn add_package(&mut self, package: Package) {
-        self.packages.push(Rc::from(RefCell::from(package)))
+    pub(crate) fn import_package(&mut self, package: Rc<RefCell<Package>>) {
+        if !self.packages.contains(&package) {
+            self.packages.push(package)
+        }
     }
 
     /// Load the package database from disk.
@@ -70,6 +71,7 @@ impl Database {
                 if confirm()? {
                     before_run(&packages);
                     for package in packages {
+                        self.import_package(package.clone());
                         update(package.borrow());
                         package.borrow_mut().mark_as_manually_installed();
                         package.borrow_mut().install();
