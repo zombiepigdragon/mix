@@ -40,26 +40,32 @@ impl Package {
     }
 
     /// Install the package.
+    /// # Todo
+    /// This does nothing whatsoever. It should place files in the correct locations.
     pub fn install(&mut self) {
-        todo!()
+        ()
     }
 
     /// Remove the package.
+    /// # Todo
+    /// This should remove files from the filesystem.
     pub fn remove(&mut self) {
         self.state = InstallState::Uninstalled;
-        todo!()
     }
 
     /// Update the package.
+    /// # Todo
+    /// This only increments the major version by one, it should actually work instead.
     pub fn update(&mut self) {
         self.version = match self.version {
             Version::SemVer(maj, min, rev) => Version::SemVer(maj + 1, min, rev),
             Version::Unknown => Version::SemVer(1, 0, 0),
         };
-        todo!()
     }
 
     /// Download the files for the package.
+    /// # Todo
+    /// This API doesn't even make sense, that should be fixed.
     pub fn fetch(
         &self,
         client: &reqwest::blocking::Client,

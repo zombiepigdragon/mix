@@ -54,6 +54,10 @@ impl Database {
     }
 
     /// Handle the operation, using this database.
+    /// # Todo
+    /// - Allow synchronization to take place at all.
+    /// - Make the closures more general, and call them whenever needed.
+    /// - Don't let every package download [example.com](https://www.example.com).
     pub fn handle_operation(
         &mut self,
         operation: &Operation,
@@ -113,7 +117,7 @@ impl Database {
                         .fetch(&client, "https://www.example.com", &mut file)?;
                 }
             }
-            // FIXME: Call the callbacks here.
+            // TODO: Call the callbacks here.
             Operation::List => {
                 for package in self.iter() {
                     println!("{}", package.borrow());
