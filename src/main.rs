@@ -52,7 +52,7 @@ impl Options {
             SubCommands::Update { targets } => {
                 Operation::Update(Self::packages_from_names(targets, database))
             }
-            SubCommands::Synchronize => Operation::Synchronize,
+            SubCommands::Sync => Operation::Synchronize,
             SubCommands::Fetch { targets } => {
                 Operation::Fetch(Self::packages_from_names(targets, database).unwrap())
             }
@@ -86,7 +86,7 @@ enum SubCommands {
     },
     /// Bring the package database up to date.
     #[structopt(alias = "sy")]
-    Synchronize,
+    Sync,
     /// Download the files of the given packages.
     #[structopt(alias = "fe")]
     Fetch {
