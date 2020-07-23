@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     cell::{Ref, RefCell},
     fs::File,
-    path::Path,
+    path::{Path, PathBuf},
     rc::Rc,
 };
 
@@ -11,6 +11,8 @@ use std::{
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Database {
     packages: Vec<Rc<RefCell<Package>>>,
+    #[serde(skip)]
+    package_cache: PathBuf,
 }
 
 impl Database {
@@ -26,9 +28,17 @@ impl Database {
 
     /// Add the given package to the database.
     pub(crate) fn import_package(&mut self, package: Rc<RefCell<Package>>) {
-        if !self.packages.contains(&package) {
-            self.packages.push(package)
+        if self.packages.contains(&package) {
+            return;
         }
+        if let Some(tarball) = &package.borrow().local_path {
+            let mut tarball = File::open(tarball).unwrap();
+            let destination = package.borrow().get_filename(&self.package_cache);
+            let mut destination = File::create(destination).unwrap();
+            std::io::copy(&mut tarball, &mut destination).unwrap();
+        }
+        package.borrow_mut().local_path = None;
+        self.packages.push(package)
     }
 
     /// Load the package database from disk.
@@ -50,8 +60,11 @@ impl Database {
     }
 
     /// Create an empty database. Should only be used on fresh installs.
-    pub fn new_empty() -> Self {
-        Self { packages: vec![] }
+    pub fn new_empty(package_cache: impl Into<PathBuf>) -> Self {
+        Self {
+            packages: vec![],
+            package_cache: package_cache.into(),
+        }
     }
 
     /// Handle the operation, using this database.
@@ -74,7 +87,8 @@ impl Database {
                         self.import_package(package.clone());
                         update(package.borrow());
                         package.borrow_mut().mark_as_manually_installed();
-                        package.borrow_mut().install();
+                        let filename = package.borrow().get_filename(&self.package_cache);
+                        package.borrow_mut().install(filename)?;
                     }
                 } else {
                     return Ok(());

@@ -1,11 +1,17 @@
 use crate::error::MixError;
 use serde::{Deserialize, Serialize};
-use std::{ffi::OsString, io::Read};
+use std::{
+    ffi::OsString,
+    fs::{create_dir, set_permissions, File, OpenOptions, Permissions},
+    io::{self, prelude::*},
+    os::unix::prelude::*,
+    path::{Path, PathBuf},
+};
 use xz2::read::XzDecoder;
 
 /// A singular package. A package is a name, list of files, and some metadata.
 /// The metadata is what allows retrieving a package, viewing the files of a package, and many similar actions.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Package {
     /// The package's name.
     pub name: String,
@@ -13,6 +19,8 @@ pub struct Package {
     pub version: Version,
     /// The installation state of the package.
     pub state: InstallState,
+    /// The local path of the package, either relative to the package directory or absolute.
+    pub local_path: Option<PathBuf>,
 }
 
 impl Package {
@@ -33,6 +41,7 @@ impl Package {
             name,
             version,
             state: InstallState::Uninstalled,
+            local_path: None,
         })
     }
 
@@ -60,16 +69,34 @@ impl Package {
         Self::from_toml(&buf)
     }
 
+    /// Provide the filename for the cached tarball of the package.
+    pub fn get_filename(&self, cache_dir: impl AsRef<Path>) -> PathBuf {
+        let mut filename = PathBuf::from(cache_dir.as_ref());
+        filename.push(format!("{}-{}", self.name, self.version));
+        filename
+    }
+
     /// Mark the package as manually installed. This does *not* install it.
     pub fn mark_as_manually_installed(&mut self) {
         self.state = InstallState::Manual;
     }
 
     /// Install the package.
-    /// # Todo
-    /// This does nothing whatsoever. It should place files in the correct locations.
-    pub fn install(&mut self) {
-        ()
+    pub fn install(&mut self, tarball_path: impl AsRef<Path>) -> Result<(), MixError> {
+        let file = File::open(tarball_path)?;
+        let file = XzDecoder::new(file);
+        let mut archive = tar::Archive::new(file);
+        let entries = archive.entries()?;
+        for entry in entries {
+            let mut entry = entry?;
+            let path = entry.path()?;
+            if let Some(".MANIFEST") = path.to_str() {
+                continue;
+            }
+            place_entry(&mut entry)?;
+            println!("{}", entry.path()?.display());
+        }
+        Ok(())
     }
 
     /// Remove the package.
@@ -107,6 +134,13 @@ impl Package {
 impl std::fmt::Display for Package {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:\t{};\t{}", self.name, self.version, self.state)
+    }
+}
+
+/// Some fields are allowed to differ between two packages, such as the path.
+impl PartialEq for Package {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.version == other.version
     }
 }
 
@@ -214,4 +248,41 @@ impl std::fmt::Display for Version {
             Version::Unknown => write!(f, "Unknown version"),
         }
     }
+}
+
+/// The tar crate has been reported to not be designed for unpacking tar files,
+/// opting for support of creating them instead. This will handle placing files
+/// on disk, as well as ensuring permissions work out. If there's a way to do
+/// this transparently through tar, feel free to open a PR with this replaced.
+fn place_entry(entry: &mut tar::Entry<impl Read>) -> Result<(), MixError> {
+    let path = PathBuf::from("/").join(entry.path()?);
+    match entry.header().entry_type() {
+        tar::EntryType::Directory => {
+            if !path.exists() {
+                let result = create_dir(&path);
+                match result {
+                    Ok(_) => {
+                        // Set the permissions of the new directory
+                        let mode = entry.header().mode()?;
+                        let permissions = Permissions::from_mode(mode);
+                        set_permissions(path, permissions)?;
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        }
+        tar::EntryType::Regular => {
+            let result = OpenOptions::new().create_new(true).write(true).open(path);
+            match result {
+                Ok(mut file) => {
+                    io::copy(entry, &mut file)?;
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        tar::EntryType::Link => todo!(),
+        tar::EntryType::Symlink => todo!(),
+        other_type => unimplemented!("{:?}", other_type),
+    }
+    Ok(())
 }

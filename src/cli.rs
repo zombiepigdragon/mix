@@ -3,12 +3,7 @@ use indicatif::*;
 use mix::{database::Database, error::MixError, operation::Operation, package::Package, selection};
 use structopt::StructOpt;
 
-use std::{
-    cell::RefCell,
-    path::{Path, PathBuf},
-    process,
-    rc::Rc,
-};
+use std::{cell::RefCell, path::PathBuf, process, rc::Rc};
 
 #[derive(Debug, StructOpt)]
 #[structopt()]
@@ -20,6 +15,10 @@ struct Options {
     /// The file containing the package database.
     #[structopt(long, default_value = ".mix.db", parse(from_os_str))]
     database: PathBuf,
+
+    #[structopt(long, default_value = ".mix.cache/", parse(from_os_str))]
+    /// Where downloaded packages are stored prior to installing.
+    package_cache: PathBuf,
 
     #[structopt(subcommand)]
     command: SubCommands,
@@ -40,7 +39,8 @@ impl Options {
                         for package_name in missing {
                             match std::fs::File::open(&package_name) {
                                 Ok(file) => {
-                                    let package = Package::from_tarball(file)?;
+                                    let mut package = Package::from_tarball(file)?;
+                                    package.local_path = Some(package_name.into());
                                     found.push(Rc::new(RefCell::new(package)));
                                 }
                                 Err(error) => match error.kind() {
@@ -149,7 +149,7 @@ enum SubCommands {
 }
 
 /// When there is no database found, prompt to create a new database.
-fn create_new_database(path: &Path) -> Result<()> {
+fn create_new_database(options: &Options) -> Result<()> {
     eprintln!("The database was not found on disk. This can happen for 2 reasons:");
     eprintln!("1: The database was removed, and this installation is corrupt.");
     eprintln!("2: This is a new install of mix, and no such file exists.");
@@ -160,9 +160,9 @@ fn create_new_database(path: &Path) -> Result<()> {
         .context("Failed to display prompt.")?
     {
         println!("Creating a new database.");
-        let database = Database::new_empty();
+        let database = Database::new_empty(&options.package_cache);
         database
-            .save(path)
+            .save(&options.database)
             .context("Failed to save the blank database to the disk.")?;
         eprintln!(
             "Blank database created. Continuing execution, but synchronizing is recommended."
@@ -176,16 +176,16 @@ fn create_new_database(path: &Path) -> Result<()> {
 }
 
 /// Load the package database. This will exit the process if the package database cannot be loaded for any reason.
-fn get_package_database(database_path: &Path) -> Database {
-    match Database::load(database_path) {
+fn get_package_database(options: &Options) -> Database {
+    match Database::load(&options.database) {
         Ok(database) => database,
         Err(error) => match error {
             MixError::FileNotFound(_) => {
-                if let Err(error) = create_new_database(database_path) {
+                if let Err(error) = create_new_database(options) {
                     eprintln!("{}", error);
                     process::exit(1)
                 }
-                Database::load(database_path).unwrap()
+                Database::load(&options.database).unwrap()
             }
             // The error is of an unprepared type, so we can't deal with it
             error => unimplemented!("Unhandled error loading database: {:#?}", error),
@@ -216,7 +216,7 @@ fn enable_progress_bar(bar: &ProgressBar, verb: &str, packages_count: usize) {
 /// The entry point of the application.
 pub fn run() -> Result<()> {
     let options = Options::from_args();
-    let mut database = get_package_database(&options.database);
+    let mut database = get_package_database(&options);
     let operation = options.get_operation(&mut database)?;
     let bar = ProgressBar::new(0).with_style(
         ProgressStyle::default_spinner()
