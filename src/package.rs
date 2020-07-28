@@ -167,9 +167,9 @@ impl std::fmt::Display for InstallState {
             f,
             "{}",
             match self {
-                Self::Manual => "Manually installed",
-                Self::Dependency => "Dependency installation",
-                Self::Uninstalled => "Not installed",
+                Self::Manual => "Manual",
+                Self::Dependency => "Dependency",
+                Self::Uninstalled => "Uninstalled",
             }
         )
     }

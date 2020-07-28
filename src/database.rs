@@ -100,12 +100,6 @@ impl Database {
                     todo!("Fetching is not yet implemented. This should download the PKGBUILD and sources.");
                 }
             }
-            Operation::List => {
-                for package in self.iter() {
-                    let package = package.borrow();
-                    println!("{}\t{}\t{}", package.name, package.version, package.state);
-                }
-            }
         }
         Ok(())
     }

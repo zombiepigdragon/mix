@@ -14,6 +14,4 @@ pub enum Operation {
     Update(Option<Vec<Rc<RefCell<Package>>>>),
     /// Download files for a package.
     Fetch(Vec<Rc<RefCell<Package>>>),
-    /// List the installed packages.
-    List,
 }

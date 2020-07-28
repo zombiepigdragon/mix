@@ -46,13 +46,8 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //! Other operations can be found in [Operation](crate::Operation).
-//! ## Note
-//! This API is not finalized, and notably does not include handling of select failures. Do not attempt to use this prerelease crate version.
 //! # Todo
 //! There is a few things that be be implemented still before a functional prerelease, presented here in a predicted order:
-//! - Allow packages to define files that they install.
-//! - Provide a way to load packages from tarballs (reading packages from disk.)
-//! - Allow packages to place filesystem files during installation.
 //! - Provide package removal functionality.
 //! - Handle package dependencies as best as possible.
 //! - Restore the unit testing, and add some integration tests to the mix.

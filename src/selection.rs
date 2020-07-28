@@ -49,8 +49,8 @@ pub fn packages_from_names(
 }
 
 /// Gets every package in the database.
-pub fn all_packages(database: &mut Database) -> SelectResults {
-    SelectResults::Results(database.iter().collect())
+pub fn all_packages(database: &Database) -> Vec<Rc<RefCell<Package>>> {
+    database.iter().collect()
 }
 
 /// Get all the dependencies of the package.

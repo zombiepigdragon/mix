@@ -104,8 +104,8 @@ impl Options {
                     }
                 };
                 Operation::Fetch(targets)
-            }
-            SubCommands::List => Operation::List,
+            },
+            SubCommands::List => unreachable!("The list subcommand was not handled.")
         })
     }
 }
@@ -217,6 +217,14 @@ fn enable_progress_bar(bar: &ProgressBar, verb: &str, packages_count: usize) {
 pub fn run() -> Result<()> {
     let options = Options::from_args();
     let mut database = get_package_database(&options);
+    // Handle this case early.
+    if let SubCommands::List = options.command {
+        for package in selection::all_packages(&database) {
+            let package = package.borrow();
+            println!("{}\t{}\t{}", package.name, package.version, package.state);
+        }
+        return Ok(());
+    }
     let operation = options.get_operation(&mut database)?;
     let confirmation = match &operation {
         Operation::Install(packages) => confirm_action("install", &packages)?,
@@ -230,7 +238,6 @@ pub fn run() -> Result<()> {
             },
         )?,
         Operation::Fetch(_) => true,
-        Operation::List => true,
     };
     if !confirmation {
         return Err(MixError::Aborted.into());
@@ -248,7 +255,6 @@ pub fn run() -> Result<()> {
             None => enable_progress_bar(&bar, "Updating everything", 0),
         },
         Operation::Fetch(packages) => enable_progress_bar(&bar, "Fetching", packages.len()),
-        Operation::List => {}
     }
     database.handle_operation(operation)?;
     bar.set_style(ProgressStyle::default_spinner().template("Finished in {elapsed}."));
