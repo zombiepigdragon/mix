@@ -102,7 +102,7 @@ impl Package {
         }
         let manifest = match manifest {
             Some(manifest) => manifest,
-            None => return Err(MixError::InvalidPackageError)
+            None => return Err(MixError::InvalidPackageError),
         };
         let metadata = match manifest {
             Ok(toml::Value::Table(metadata)) => metadata,
