@@ -1,7 +1,11 @@
-use crate::{error::MixError, operation::Operation, package::Package};
+use crate::{
+    error::MixError,
+    operation::Operation,
+    package::{self, Package},
+};
 use serde::{Deserialize, Serialize};
 use std::{
-    cell::{Ref, RefCell},
+    cell::RefCell,
     fs::File,
     path::{Path, PathBuf},
     rc::Rc,
@@ -17,9 +21,12 @@ pub struct Database {
 
 impl Database {
     /// Given the name of a package, provide the package itself.
-    pub(crate) fn get_package(&self, package_name: &str) -> Option<Rc<RefCell<Package>>> {
+    pub(crate) fn get_package(
+        &self,
+        package_name: &impl AsRef<str>,
+    ) -> Option<Rc<RefCell<Package>>> {
         self.iter()
-            .find(|package| package.borrow().name == package_name)
+            .find(|package| package.borrow().name == package_name.as_ref())
     }
     /// Provide an iterator over the values of the database.
     pub(crate) fn iter(&self) -> impl Iterator<Item = Rc<RefCell<Package>>> + '_ {
@@ -27,26 +34,29 @@ impl Database {
     }
 
     /// Add the given package to the database.
-    pub(crate) fn import_package(&mut self, package: Rc<RefCell<Package>>) {
+    pub(crate) fn import_package(&mut self, package: Rc<RefCell<Package>>) -> Result<(), MixError> {
         if self.packages.contains(&package) {
-            return;
+            return Ok(());
         }
         if let Some(tarball) = &package.borrow().local_path {
-            let mut tarball = File::open(tarball).unwrap();
-            let destination = package.borrow().get_filename(&self.package_cache);
-            let mut destination = File::create(destination).unwrap();
-            std::io::copy(&mut tarball, &mut destination).unwrap();
+            let mut tarball = File::open(tarball)?;
+            let destination = self.package_cache.join(package.borrow().get_filename());
+            let mut destination = File::create(destination)?;
+            std::io::copy(&mut tarball, &mut destination)?;
         }
         package.borrow_mut().local_path = None;
-        self.packages.push(package)
+        self.packages.push(package);
+        Ok(())
     }
 
     /// Load the package database from disk.
-    pub fn load(path: &Path) -> Result<Self, MixError> {
-        let file = match File::open(path) {
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, MixError> {
+        let file = match File::open(&path) {
             Ok(file) => file,
             Err(err) => match err.kind() {
-                std::io::ErrorKind::NotFound => return Err(MixError::FileNotFound(path.into())),
+                std::io::ErrorKind::NotFound => {
+                    return Err(MixError::FileNotFound(path.as_ref().to_owned()))
+                }
                 _ => return Err(MixError::IOError(err)),
             },
         };
@@ -68,78 +78,44 @@ impl Database {
     }
 
     /// Handle the operation, using this database.
-    /// # Todo
-    /// - Allow synchronization to take place at all.
-    /// - Make the closures more general, and call them whenever needed.
-    /// - Don't let every package download [example.com](https://www.example.com).
-    pub fn handle_operation(
-        &mut self,
-        operation: &Operation,
-        confirm: impl FnOnce() -> Result<bool, MixError>,
-        before_run: impl FnOnce(&Vec<Rc<RefCell<Package>>>),
-        update: &mut impl FnMut(Ref<Package>),
-    ) -> Result<(), MixError> {
+    pub fn handle_operation(&mut self, operation: Operation) -> Result<(), MixError> {
         match operation {
             Operation::Install(packages) => {
-                if confirm()? {
-                    before_run(&packages);
-                    for package in packages {
-                        self.import_package(package.clone());
-                        update(package.borrow());
-                        package.borrow_mut().mark_as_manually_installed();
-                        let filename = package.borrow().get_filename(&self.package_cache);
-                        package.borrow_mut().install(filename)?;
-                    }
-                } else {
-                    return Ok(());
-                }
+                package::install(&packages, self)?;
             }
             Operation::Remove(packages) => {
-                if confirm()? {
-                    before_run(&packages);
-                    for package in packages {
-                        update(package.borrow());
-                        package.borrow_mut().remove();
-                    }
-                } else {
-                    println!("Aborting.")
-                }
+                package::remove(&packages, self)?;
             }
             Operation::Synchronize => todo!(),
             Operation::Update(packages) => {
                 let packages = match packages {
-                    Some(packages) => packages.clone(),
+                    Some(packages) => packages,
                     None => self.iter().collect(),
                 };
-                if confirm()? {
-                    before_run(&packages);
-                    for package in packages {
-                        update(package.borrow());
-                        package.borrow_mut().update();
-                    }
-                } else {
-                    return Err(MixError::Aborted);
-                }
+                package::update(&packages, self)?;
             }
             Operation::Fetch(packages) => {
-                let client = reqwest::blocking::Client::new();
-                before_run(&packages);
-                for package in packages {
-                    let filename = format!("./{}.PKGBUILD", package.borrow().name);
-                    let mut file = File::create(&filename)?;
-                    update(package.borrow());
-                    package
-                        .borrow()
-                        .fetch(&client, "https://www.example.com", &mut file)?;
+                let _client = reqwest::blocking::Client::new();
+                for _package in packages {
+                    todo!("Fetching is not yet implemented. This should download the PKGBUILD and sources.");
                 }
             }
-            // TODO: Call the callbacks here.
             Operation::List => {
                 for package in self.iter() {
-                    println!("{}", package.borrow());
+                    let package = package.borrow();
+                    println!("{}\t{}\t{}", package.name, package.version, package.state);
                 }
             }
         }
         Ok(())
+    }
+
+    /// Get the path of the package within the package cache.
+    pub fn open_package_tarball(&self, package: &Package) -> Result<impl std::io::Read, MixError> {
+        let filename = self.package_cache.join(package.get_filename());
+        if filename.exists() {
+            return Ok(File::open(filename)?);
+        }
+        todo!()
     }
 }

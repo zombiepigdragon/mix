@@ -1,13 +1,71 @@
-use crate::error::MixError;
+use crate::{database::Database, error::MixError};
 use serde::{Deserialize, Serialize};
 use std::{
+    cell::RefCell,
     ffi::OsString,
-    fs::{create_dir, set_permissions, File, OpenOptions, Permissions},
+    fs::{create_dir, set_permissions, OpenOptions, Permissions},
     io::{self, prelude::*},
     os::unix::prelude::*,
-    path::{Path, PathBuf},
+    path::PathBuf,
+    rc::Rc,
 };
+use tar::Archive;
 use xz2::read::XzDecoder;
+
+/// Install the given packages. This will place files onto the filesystem, and
+/// mark the packages as installed (either as a dependency if not installed, or
+/// leaving the state as dependency or manually installed.)
+pub fn install(packages: &[Rc<RefCell<Package>>], database: &mut Database) -> Result<(), MixError> {
+    for package in packages {
+        // Make sure the package is known.
+        database.import_package(package.clone())?;
+        // Open the package tarball for reading.
+        let file = database.open_package_tarball(&package.borrow())?;
+        let file = XzDecoder::new(file);
+        let mut file = Archive::new(file);
+        // Place the files into the filesystem.
+        for entry in file.entries()? {
+            let mut entry = entry?;
+            match entry.path()?.to_str() {
+                Some(".MANIFEST") => continue,
+                _ => place_entry(&mut entry)?,
+            }
+        }
+        // Flag the package as installed.
+        let package_state = match package.borrow().state {
+            InstallState::Manual => InstallState::Manual,
+            InstallState::Dependency | InstallState::Uninstalled => InstallState::Dependency,
+        };
+        package.borrow_mut().state = package_state;
+    }
+    Ok(())
+}
+
+/// Remove the given packages. This will remove any files of the package from
+/// the filesystem, as well as marking the package as not installed.
+/// # Warning
+/// A call to this function that removes dependencies of installed packages but
+/// not those packages will place the package database into an an unsafe state.
+pub fn remove(packages: &[Rc<RefCell<Package>>], _database: &mut Database) -> Result<(), MixError> {
+    for _package in packages {
+        todo!()
+    }
+    Ok(())
+}
+
+/// Update the given packages to the latest version. This may skip over packages
+/// that are already up to date.
+pub fn update(packages: &[Rc<RefCell<Package>>], _database: &mut Database) -> Result<(), MixError> {
+    for _package in packages {
+        todo!()
+    }
+    Ok(())
+}
+
+/// Download the files of the given package.
+pub fn fetch(_package: Rc<RefCell<Package>>) -> Result<(), MixError> {
+    todo!()
+}
 
 /// A singular package. A package is a name, list of files, and some metadata.
 /// The metadata is what allows retrieving a package, viewing the files of a package, and many similar actions.
@@ -19,14 +77,34 @@ pub struct Package {
     pub version: Version,
     /// The installation state of the package.
     pub state: InstallState,
+    /// The files included in the package.
+    pub files: Vec<PathBuf>,
     /// The local path of the package, either relative to the package directory or absolute.
     pub local_path: Option<PathBuf>,
 }
 
 impl Package {
-    /// Provide a package from its toml metadata
-    pub fn from_toml(data: &str) -> Result<Self, MixError> {
-        let metadata = match data.parse::<toml::Value>() {
+    /// Provide a package from a tarball
+    pub fn from_tarball(file: impl Read) -> Result<Self, MixError> {
+        let file = XzDecoder::new(file);
+        let mut archive = Archive::new(file);
+        let mut files = vec![];
+        let mut manifest = None;
+        for entry in archive.entries()? {
+            let mut entry = entry?;
+            if entry.path()? == OsString::from(".MANIFEST") {
+                let mut buf = String::new();
+                entry.read_to_string(&mut buf)?;
+                manifest = Some(buf.parse::<toml::Value>());
+            } else {
+                files.push(PathBuf::from(entry.path()?))
+            }
+        }
+        let manifest = match manifest {
+            Some(manifest) => manifest,
+            None => return Err(MixError::InvalidPackageError)
+        };
+        let metadata = match manifest {
             Ok(toml::Value::Table(metadata)) => metadata,
             Ok(value) => return Err(MixError::InvalidManifestError(value)),
             Err(error) => return Err(MixError::ManifestParseError(error)),
@@ -36,104 +114,31 @@ impl Package {
         } else {
             return Err(MixError::InvalidManifestError(metadata["name"].clone()));
         };
+        // TODO: Read a version out of the file.
         let version = Version::Unknown;
-        Ok(Package {
+        Ok(Self {
             name,
             version,
             state: InstallState::Uninstalled,
+            files,
             local_path: None,
         })
     }
 
-    /// Provide a package from a tarball
-    pub fn from_tarball(file: impl Read) -> Result<Self, MixError> {
-        let file = XzDecoder::new(file);
-        let mut archive = tar::Archive::new(file);
-        let mut entries = archive.entries()?;
-        let manifest = loop {
-            match entries.next() {
-                Some(entry) => {
-                    let entry = entry?;
-                    if entry.path()? == OsString::from(".MANIFEST") {
-                        break Some(entry);
-                    }
-                }
-                None => break None,
-            }
-        };
-        if manifest.is_none() {
-            return Err(MixError::InvalidPackageError);
-        }
-        let mut buf = String::new();
-        manifest.unwrap().read_to_string(&mut buf)?;
-        Self::from_toml(&buf)
-    }
-
-    /// Provide the filename for the cached tarball of the package.
-    pub fn get_filename(&self, cache_dir: impl AsRef<Path>) -> PathBuf {
-        let mut filename = PathBuf::from(cache_dir.as_ref());
-        filename.push(format!("{}-{}", self.name, self.version));
-        filename
+    /// Provide the filename for the tarball of the package.
+    pub fn get_filename(&self) -> PathBuf {
+        PathBuf::from(format!("{}-{}.tar.xz", self.name, self.version))
     }
 
     /// Mark the package as manually installed. This does *not* install it.
     pub fn mark_as_manually_installed(&mut self) {
         self.state = InstallState::Manual;
     }
-
-    /// Install the package.
-    pub fn install(&mut self, tarball_path: impl AsRef<Path>) -> Result<(), MixError> {
-        let file = File::open(tarball_path)?;
-        let file = XzDecoder::new(file);
-        let mut archive = tar::Archive::new(file);
-        let entries = archive.entries()?;
-        for entry in entries {
-            let mut entry = entry?;
-            let path = entry.path()?;
-            if let Some(".MANIFEST") = path.to_str() {
-                continue;
-            }
-            place_entry(&mut entry)?;
-            println!("{}", entry.path()?.display());
-        }
-        Ok(())
-    }
-
-    /// Remove the package.
-    /// # Todo
-    /// This should remove files from the filesystem.
-    pub fn remove(&mut self) {
-        self.state = InstallState::Uninstalled;
-    }
-
-    /// Update the package.
-    /// # Todo
-    /// This only increments the major version by one, it should actually work instead.
-    pub fn update(&mut self) {
-        self.version = match self.version {
-            Version::SemVer(maj, min, rev) => Version::SemVer(maj + 1, min, rev),
-            Version::Unknown => Version::SemVer(1, 0, 0),
-        };
-    }
-
-    /// Download the files for the package.
-    /// # Todo
-    /// This API doesn't even make sense, that should be fixed.
-    pub fn fetch(
-        &self,
-        client: &reqwest::blocking::Client,
-        url: &str,
-        file: &mut std::fs::File,
-    ) -> Result<(), MixError> {
-        let mut data = client.get(url).send()?;
-        data.copy_to(file)?;
-        Ok(())
-    }
 }
 
 impl std::fmt::Display for Package {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:\t{};\t{}", self.name, self.version, self.state)
+        write!(f, "{}", self.name)
     }
 }
 
@@ -162,9 +167,9 @@ impl std::fmt::Display for InstallState {
             f,
             "{}",
             match self {
-                InstallState::Manual => "Manually installed",
-                InstallState::Dependency => "Dependency installation",
-                InstallState::Uninstalled => "Not installed",
+                Self::Manual => "Manually installed",
+                Self::Dependency => "Dependency installation",
+                Self::Uninstalled => "Not installed",
             }
         )
     }
@@ -202,20 +207,20 @@ impl Ord for Version {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         use std::cmp::Ordering;
         match (self, other) {
-            (Version::SemVer(maj1, min1, rev1), Version::SemVer(maj2, min2, rev2)) => {
+            (Self::SemVer(maj1, min1, rev1), Self::SemVer(maj2, min2, rev2)) => {
                 if maj1 != maj2 {
                     maj1.cmp(maj2)
                 } else if min1 != min2 {
                     min1.cmp(min2)
-                } else if rev1 != rev2 {
-                    rev1.cmp(rev2)
-                } else {
+                } else if rev1 == rev2 {
                     Ordering::Equal
+                } else {
+                    rev1.cmp(rev2)
                 }
             }
-            (Version::SemVer(_, _, _), Version::Unknown) => Ordering::Greater,
-            (Version::Unknown, Version::SemVer(_, _, _)) => Ordering::Less,
-            (Version::Unknown, Version::Unknown) => Ordering::Equal,
+            (Self::SemVer(_, _, _), Self::Unknown) => Ordering::Greater,
+            (Self::Unknown, Self::SemVer(_, _, _)) => Ordering::Less,
+            (Self::Unknown, Self::Unknown) => Ordering::Equal,
         }
     }
 }
@@ -229,13 +234,13 @@ impl PartialOrd for Version {
 impl PartialEq for Version {
     fn eq(&self, other: &Self) -> bool {
         match self {
-            Version::SemVer(maj1, min1, rev1) => match other {
-                Version::SemVer(maj2, min2, rev2) => maj1 == maj2 && min1 == min2 && rev1 == rev2,
-                Version::Unknown => false,
+            Self::SemVer(maj1, min1, rev1) => match other {
+                Self::SemVer(maj2, min2, rev2) => maj1 == maj2 && min1 == min2 && rev1 == rev2,
+                Self::Unknown => false,
             },
-            Version::Unknown => match other {
-                Version::SemVer(_, _, _) => false,
-                Version::Unknown => true,
+            Self::Unknown => match other {
+                Self::SemVer(_, _, _) => false,
+                Self::Unknown => true,
             },
         }
     }
@@ -244,8 +249,8 @@ impl PartialEq for Version {
 impl std::fmt::Display for Version {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Version::SemVer(x, y, z) => write!(f, "{}.{}.{}", x, y, z),
-            Version::Unknown => write!(f, "Unknown version"),
+            Self::SemVer(x, y, z) => write!(f, "{}.{}.{}", x, y, z),
+            Self::Unknown => write!(f, "Unknown version"),
         }
     }
 }

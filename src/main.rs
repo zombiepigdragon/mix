@@ -6,7 +6,7 @@ fn main() {
     match cli::run() {
         Ok(_) => (),
         Err(error) => {
-            eprintln!("{}", error);
+            eprintln!("{:#?}", error);
             process::exit(1);
         }
     }

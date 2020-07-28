@@ -13,8 +13,12 @@
 //! /// The packages that will be installed.
 //! let package_names = vec!["foo"];
 //! /// Load the database and use it to find the needed package metadata.
-//! let database = mix::Database::load("/var/lib/mix/mix.db")?;
-//! let packages = mix::with_dependencies(&package_names, &database)?;
+//! let mut database = mix::Database::load("/var/lib/mix/mix.db")?;
+//! /// If the packages are found, mix::with_dependencies will provide every dependency needed to install the packages.
+//! let packages = match mix::with_dependencies(&package_names, &database) {
+//!    mix::selection::SelectResults::Results(packages) => packages,
+//!    mix::selection::SelectResults::NotFound(missing, _found) => panic!("Couldn't find {:?}", missing)
+//! };
 //! /// Select the operation to perform with the packages.
 //! let operation = mix::Operation::Install(packages);
 //! /// Perform the operation.
@@ -24,16 +28,19 @@
 //! To remove `foo`, it's a similar process:
 //! ```no_run
 //! let package_names = vec!["foo"];
-//! let database = mix::Database::load("/var/lib/mix/mix.db")?;
+//! let mut database = mix::Database::load("/var/lib/mix/mix.db")?;
 //! /// This won't include any dependencies that can't be removed with the given packages.
-//! let packages = mix::with_dependencies(&package_names, &database)?;
+//! let packages = match mix::with_dependencies(&package_names, &database) {
+//!    mix::selection::SelectResults::Results(packages) => packages,
+//!    mix::selection::SelectResults::NotFound(missing, _found) => panic!("Couldn't find {:?}", missing)
+//! };
 //! let operation = mix::Operation::Remove(packages);
 //! database.handle_operation(operation)?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //! Synchronizing the database lists is not automatically performed for crate consumers, but it can be done manually with:
 //! ```no_run
-//! # let database = mix::Database::load("/var/lib/mix/mix.db")?;
+//! # let mut database = mix::Database::load("/var/lib/mix/mix.db")?;
 //! let operation = mix::Operation::Synchronize;
 //! database.handle_operation(operation)?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
@@ -61,6 +68,7 @@
 //! - Clean up the inevitable flaws in the dependency resolving.
 
 #![warn(missing_docs)] // To keep codebase familiarity possible, docs are required
+
 /// The package database. All functionality with storing the available packages
 /// and the state of the installed packages is here.
 pub mod database;

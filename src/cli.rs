@@ -218,46 +218,39 @@ pub fn run() -> Result<()> {
     let options = Options::from_args();
     let mut database = get_package_database(&options);
     let operation = options.get_operation(&mut database)?;
+    let confirmation = match &operation {
+        Operation::Install(packages) => confirm_action("install", &packages)?,
+        Operation::Remove(packages) => confirm_action("remove", &packages)?,
+        Operation::Synchronize => true,
+        Operation::Update(packages) => confirm_action(
+            "update",
+            &match packages {
+                Some(packages) => packages.clone(),
+                None => vec![],
+            },
+        )?,
+        Operation::Fetch(_) => true,
+        Operation::List => true,
+    };
+    if !confirmation {
+        return Err(MixError::Aborted.into());
+    }
     let bar = ProgressBar::new(0).with_style(
         ProgressStyle::default_spinner()
             .template("{spinner} {pos}/{len} {prefix} {msg} {percent}% {wide_bar} {eta}"),
     );
-    database.handle_operation(
-        &operation,
-        || {
-            let (verb, packages) = match &operation {
-                Operation::Install(packages) => ("install", packages),
-                Operation::Remove(packages) => ("remove", packages),
-                // Don't verify for a manual synchronization
-                Operation::Synchronize => return Ok(true),
-                Operation::Update(packages) => {
-                    match packages {
-                        Some(packages) => ("update", packages),
-                        // Don't verify all package updating
-                        // TODO: This should be verified.
-                        None => return Ok(true),
-                    }
-                }
-                // Don't verify a fetch.
-                Operation::Fetch(_) => return Ok(true),
-                // Don't verify a list.
-                Operation::List => return Ok(true),
-            };
-            match confirm_action(verb, packages) {
-                Ok(result) => Ok(result),
-                Err(error) => {
-                    eprintln!("Error: {:#?}", error);
-                    Err(MixError::Aborted)
-                }
-            }
+    match &operation {
+        Operation::Install(packages) => enable_progress_bar(&bar, "Installing", packages.len()),
+        Operation::Remove(packages) => enable_progress_bar(&bar, "Removing", packages.len()),
+        Operation::Synchronize => {}
+        Operation::Update(packages) => match packages {
+            Some(packages) => enable_progress_bar(&bar, "Updating", packages.len()),
+            None => enable_progress_bar(&bar, "Updating everything", 0),
         },
-        |packages| enable_progress_bar(&bar, "TODO: Name this", packages.len()),
-        &mut |package| {
-            bar.inc(1);
-            bar.println(format!("{} {}", "Placeholder verb-ing", package.name));
-            bar.set_message(&package.name)
-        },
-    )?;
+        Operation::Fetch(packages) => enable_progress_bar(&bar, "Fetching", packages.len()),
+        Operation::List => {}
+    }
+    database.handle_operation(operation)?;
     bar.set_style(ProgressStyle::default_spinner().template("Finished in {elapsed}."));
     bar.disable_steady_tick();
     bar.finish();
