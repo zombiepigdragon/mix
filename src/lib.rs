@@ -5,9 +5,43 @@
 //! mix --help
 //! ```
 //! for a list of available commands.
-//! # Status
-//! Creates a dummy repository in the current directory, which can be operated on but does NOT affect files.
-//! In addition, it is currently impossible to add new packages without editing the database manually.
+//! # Note
+//! This documentation is not the user manual for normal mix usage. Check the man page for end user documentation.
+//! # Usage
+//! Using mix is a fairly straightforward process. For example, to install a package named `foo`:
+//! ```no_run
+//! /// The packages that will be installed.
+//! let package_names = vec!["foo"];
+//! /// Load the database and use it to find the needed package metadata.
+//! let database = mix::Database::load("/var/lib/mix/mix.db")?;
+//! let packages = mix::with_dependencies(&package_names, &database)?;
+//! /// Select the operation to perform with the packages.
+//! let operation = mix::Operation::Install(packages);
+//! /// Perform the operation.
+//! database.handle_operation(operation)?;
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//! To remove `foo`, it's a similar process:
+//! ```no_run
+//! let package_names = vec!["foo"];
+//! let database = mix::Database::load("/var/lib/mix/mix.db")?;
+//! /// This won't include any dependencies that can't be removed with the given packages.
+//! let packages = mix::with_dependencies(&package_names, &database)?;
+//! let operation = mix::Operation::Remove(packages);
+//! database.handle_operation(operation)?;
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//! Synchronizing the database lists is not automatically performed for crate consumers, but it can be done manually with:
+//! ```no_run
+//! # let database = mix::Database::load("/var/lib/mix/mix.db")?;
+//! let operation = mix::Operation::Synchronize;
+//! database.handle_operation(operation)?;
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//! Other operations can be found in [Operation](crate::Operation).
+//! ## Note
+//! This API is not finalized, and notably does not include handling of select failures. Do not attempt to use this prerelease crate version.
+//! # Todo
 //! There is a few things that be be implemented still before a functional prerelease, presented here in a predicted order:
 //! - Allow packages to define files that they install.
 //! - Provide a way to load packages from tarballs (reading packages from disk.)
@@ -16,6 +50,7 @@
 //! - Handle package dependencies as best as possible.
 //! - Restore the unit testing, and add some integration tests to the mix.
 //! - Most likely, also add some form of property based testing: it seems like some components in mix may benefit from it.
+//!
 //! Any other functionality is either not currently high priority or was overlooked: contact me if it's not listed below.
 //!
 //! The current list of features not needed for an alpha prerelease but wanted for a stable:
@@ -37,3 +72,9 @@ pub mod operation;
 pub mod package;
 /// Selecting packages from the database for operations.
 pub mod selection;
+
+pub use database::Database;
+pub use error::MixError as Error;
+pub use operation::Operation;
+pub use package::{InstallState, Package, Version};
+pub use selection::{all_packages, package_from_name, packages_from_names, with_dependencies};
