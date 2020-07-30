@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
     ffi::OsString,
-    fs::{create_dir, set_permissions, OpenOptions, Permissions},
+    fs::{
+        create_dir, metadata, remove_dir, remove_file, set_permissions, OpenOptions, Permissions,
+    },
     io::{self, prelude::*},
     os::unix::prelude::*,
     path::PathBuf,
@@ -46,9 +48,38 @@ pub fn install(packages: &[Rc<RefCell<Package>>], database: &mut Database) -> Re
 /// # Warning
 /// A call to this function that removes dependencies of installed packages but
 /// not those packages will place the package database into an an unsafe state.
-pub fn remove(packages: &[Rc<RefCell<Package>>], _database: &mut Database) -> Result<(), MixError> {
-    for _package in packages {
-        todo!()
+pub fn remove(packages: &[Rc<RefCell<Package>>], database: &mut Database) -> Result<(), MixError> {
+    for package in packages {
+        package.borrow_mut().state = InstallState::Uninstalled;
+        let file = database.open_package_tarball(&package.borrow())?;
+        let file = XzDecoder::new(file);
+        let mut file = Archive::new(file);
+        for entry in file.entries()? {
+            let entry = entry?;
+            let path = PathBuf::from("/").join(entry.path()?);
+            if path.to_str() == Some("/.MANIFEST") {
+                // Don't try to remove the package manifest file
+                continue;
+            }
+            if !path.exists() {
+                eprintln!(
+                    "Warning: {} was not able to be removed because it doesn't exist.",
+                    path.display()
+                );
+                continue;
+            }
+            let metadata = metadata(&path)?;
+            if metadata.is_file() {
+                remove_file(&path)?;
+            // Is directory and empty
+            } else if metadata.is_dir() {
+                if path.read_dir()?.next().is_none() {
+                    remove_dir(&path)?;
+                }
+            } else {
+                unimplemented!("{} is not a file or directory!", path.display())
+            }
+        }
     }
     Ok(())
 }

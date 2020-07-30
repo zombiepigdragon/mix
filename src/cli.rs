@@ -104,8 +104,8 @@ impl Options {
                     }
                 };
                 Operation::Fetch(targets)
-            },
-            SubCommands::List => unreachable!("The list subcommand was not handled.")
+            }
+            SubCommands::List => unreachable!("The list subcommand was not handled."),
         })
     }
 }
@@ -256,6 +256,9 @@ pub fn run() -> Result<()> {
         },
         Operation::Fetch(packages) => enable_progress_bar(&bar, "Fetching", packages.len()),
     }
+    // BUG/TODO: The progress bar obscures output. This can't be solved until
+    // progress reporting is better implemented, so it's being left for now.
+    bar.finish_and_clear();
     database.handle_operation(operation)?;
     bar.set_style(ProgressStyle::default_spinner().template("Finished in {elapsed}."));
     bar.disable_steady_tick();
