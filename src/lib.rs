@@ -80,4 +80,4 @@ pub use database::Database;
 pub use error::MixError as Error;
 pub use operation::Operation;
 pub use package::{InstallState, Package, Version};
-pub use selection::{all_packages, package_from_name, packages_from_names, with_dependencies};
+pub use selection::{all_packages, package_from_name, packages_from_names};

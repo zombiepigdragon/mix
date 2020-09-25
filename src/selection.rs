@@ -1,35 +1,55 @@
 //! # Todo
 //! This will see some revamp, separating dependencies from the manual targets
-//! and maybe even making the SelectResults an actual Result.
 
 use crate::database::Database;
+use crate::error::MixError;
 use crate::package::Package;
 use std::{cell::RefCell, rc::Rc};
 
-/// The results of selecting a set of packages.
-pub enum SelectResults {
-    /// All of the packages selected were found.
-    Results(Vec<Rc<RefCell<Package>>>),
-    /// Of the selected packages, these were not found.
-    NotFound(Vec<String>, Vec<Rc<RefCell<Package>>>),
+/// The todo list for any given operation. For example, the list of packages
+/// needing an install or upgrade.
+#[derive(Debug, Default)]
+pub struct Selections {
+    /// Packages that will be installed by the operation.
+    pub install: Vec<Rc<RefCell<Package>>>,
+    /// Packages that will be removed by the operation.
+    pub remove: Vec<Rc<RefCell<Package>>>,
+    /// Packages that will be upgraded by the operation.
+    pub upgrade: Vec<Rc<RefCell<Package>>>,
+    /// Packages that will be downgraded by the operation.
+    pub downgrade: Vec<Rc<RefCell<Package>>>,
 }
 
 /// Get a single package by name.
-pub fn package_from_name(package_name: &impl AsRef<str>, database: &Database) -> SelectResults {
+pub fn package_from_name(
+    package_name: &impl AsRef<str>,
+    database: &Database,
+) -> Result<Rc<RefCell<Package>>, MixError> {
     match database
         .iter()
         .find(|package| package.borrow().name == package_name.as_ref())
     {
-        Some(package) => SelectResults::Results(vec![package]),
-        None => SelectResults::NotFound(vec![package_name.as_ref().to_owned()], vec![]),
+        Some(package) => Ok(package),
+        None => Err(MixError::PackageNotFound(vec![String::from(
+            package_name.as_ref(),
+        )])),
     }
 }
 
 /// Turns a set of package names into their respective package objects.
+/// # Errors
+/// The error value contains first a [package not found error](crate::error::MixError::PackageNotFound),
+/// followed by a [Vec](Vec) of all of the packages that were found. This allows for
+/// error resolution via other means (searching for the package on disk, for
+/// example.)
+/// # Todo
+/// The error return feels uncomfortable at best, and bad at worst.
+/// If a cleaner way to handle it arises, it should be implemented as soon as
+/// comfortable.
 pub fn packages_from_names(
     package_names: &[impl AsRef<str>],
     database: &Database,
-) -> SelectResults {
+) -> Result<Vec<Rc<RefCell<Package>>>, (MixError, Vec<Rc<RefCell<Package>>>)> {
     let mut packages_found = Vec::new();
     let mut packages_not_found = Vec::new();
     package_names
@@ -43,19 +63,15 @@ pub fn packages_from_names(
         })
         .for_each(drop);
     if !packages_not_found.is_empty() {
-        return SelectResults::NotFound(packages_not_found, packages_found);
+        return Err((
+            MixError::PackageNotFound(packages_not_found),
+            packages_found,
+        ));
     }
-    SelectResults::Results(packages_found)
+    Ok(packages_found)
 }
 
 /// Gets every package in the database.
 pub fn all_packages(database: &Database) -> Vec<Rc<RefCell<Package>>> {
     database.iter().collect()
-}
-
-/// Get all the dependencies of the package.
-/// # Todo
-/// This does not actually account for dependencies, it just finds the named packages.
-pub fn with_dependencies(package_names: &[impl AsRef<str>], database: &Database) -> SelectResults {
-    packages_from_names(package_names, database)
 }

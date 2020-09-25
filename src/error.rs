@@ -5,8 +5,8 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum MixError {
     /// The package(s) were not in the database.
-    #[error("Package not found")]
-    PackageNotFound,
+    #[error("Packages not found: {0:?}")]
+    PackageNotFound(Vec<String>),
     /// The package(s) need to be installed, but were not.
     #[error("Package not installed")]
     PackageNotInstalled,

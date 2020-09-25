@@ -33,8 +33,8 @@ impl Options {
                     database,
                 );
                 let targets = match targets {
-                    selection::SelectResults::Results(targets) => targets,
-                    selection::SelectResults::NotFound(missing, mut found) => {
+                    Ok(targets) => targets,
+                    Err((MixError::PackageNotFound(missing), mut found)) => {
                         let mut truly_missing = vec![];
                         for package_name in missing {
                             match std::fs::File::open(&package_name) {
@@ -59,6 +59,12 @@ impl Options {
                         }
                         found
                     }
+                    Err(err) => {
+                        return Err(anyhow!(
+                            "Unexpected error resolving package names: {:?}",
+                            err
+                        ))
+                    }
                 };
                 Operation::Install(targets)
             }
@@ -68,8 +74,8 @@ impl Options {
                     database,
                 );
                 let targets = match targets {
-                    selection::SelectResults::Results(targets) => targets,
-                    selection::SelectResults::NotFound(_, missing) => {
+                    Ok(targets) => targets,
+                    Err((missing, _)) => {
                         return Err(anyhow!("Failed to find packages {:?}", missing));
                     }
                 };
@@ -84,8 +90,8 @@ impl Options {
                     database,
                 );
                 let targets = match targets {
-                    selection::SelectResults::Results(targets) => targets,
-                    selection::SelectResults::NotFound(_, missing) => {
+                    Ok(targets) => targets,
+                    Err((missing, _)) => {
                         return Err(anyhow!("Failed to find packages {:?}", missing));
                     }
                 };
@@ -98,8 +104,8 @@ impl Options {
                     database,
                 );
                 let targets = match targets {
-                    selection::SelectResults::Results(targets) => targets,
-                    selection::SelectResults::NotFound(_, missing) => {
+                    Ok(targets) => targets,
+                    Err((missing, _)) => {
                         return Err(anyhow!("Failed to find packages {:?}", missing));
                     }
                 };
