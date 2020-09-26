@@ -3,7 +3,7 @@
 
 use crate::database::Database;
 use crate::error::MixError;
-use crate::package::Package;
+use crate::package::{InstallState, Package};
 use std::{cell::RefCell, rc::Rc};
 
 /// The todo list for any given operation. For example, the list of packages
@@ -69,6 +69,39 @@ pub fn packages_from_names(
         ));
     }
     Ok(packages_found)
+}
+
+/// Select the packages required for an installation of a package. This means
+/// dependencies and resolution of package names to objects.
+/// # Todo
+/// This currently has the same error type as [packages_from_names](packages_from_names).
+/// Once that function is updated, this function needs the same update.
+///
+/// This function needs to handle dependencies once packages support this.
+///
+/// Write similar functions once it makes sense at all to have them.
+pub fn install(
+    package_names: &[impl AsRef<str>],
+    database: &Database,
+) -> Result<Selections, (MixError, Vec<Rc<RefCell<Package>>>)> {
+    let packages = packages_from_names(package_names, database)?;
+    let mut selections = Selections::default();
+    for package in packages {
+        if package.borrow().state != InstallState::Uninstalled {
+            continue;
+        }
+        selections.install.push(package.clone());
+    }
+    Ok(selections)
+}
+
+/// # Todo
+/// Write this.
+pub fn remove(
+    _package_names: &[impl AsRef<str>],
+    _database: &Database,
+) -> Result<Selections, (MixError, Vec<Rc<RefCell<Package>>>)> {
+    todo!()
 }
 
 /// Gets every package in the database.

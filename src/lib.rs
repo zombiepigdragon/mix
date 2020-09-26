@@ -14,11 +14,8 @@
 //! let package_names = vec!["foo"];
 //! /// Load the database and use it to find the needed package metadata.
 //! let mut database = mix::Database::load("/var/lib/mix/mix.db")?;
-//! /// If the packages are found, mix::with_dependencies will provide every dependency needed to install the packages.
-//! let packages = match mix::with_dependencies(&package_names, &database) {
-//!    mix::selection::SelectResults::Results(packages) => packages,
-//!    mix::selection::SelectResults::NotFound(missing, _found) => panic!("Couldn't find {:?}", missing)
-//! };
+//! /// If the packages are found, mix::selection::install will provide every dependency needed to install the packages.
+//! let packages = mix::selection::install(&package_names, &database).unwrap();
 //! /// Select the operation to perform with the packages.
 //! let operation = mix::Operation::Install(packages);
 //! /// Perform the operation.
@@ -30,10 +27,7 @@
 //! let package_names = vec!["foo"];
 //! let mut database = mix::Database::load("/var/lib/mix/mix.db")?;
 //! /// This won't include any dependencies that can't be removed with the given packages.
-//! let packages = match mix::with_dependencies(&package_names, &database) {
-//!    mix::selection::SelectResults::Results(packages) => packages,
-//!    mix::selection::SelectResults::NotFound(missing, _found) => panic!("Couldn't find {:?}", missing)
-//! };
+//! let packages = mix::selection::remove(&package_names, &database).unwrap();
 //! let operation = mix::Operation::Remove(packages);
 //! database.handle_operation(operation)?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
