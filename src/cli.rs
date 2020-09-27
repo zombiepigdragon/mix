@@ -265,7 +265,7 @@ pub fn run() -> Result<()> {
     // BUG/TODO: The progress bar obscures output. This can't be solved until
     // progress reporting is better implemented, so it's being left for now.
     bar.finish_and_clear();
-    database.handle_operation(operation)?;
+    todo!("Rewrite the operation handling.");
     bar.set_style(ProgressStyle::default_spinner().template("Finished in {elapsed}."));
     bar.disable_steady_tick();
     bar.finish();

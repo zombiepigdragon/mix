@@ -2,6 +2,7 @@ use crate::{
     error::MixError,
     operation::Operation,
     package::{self, Package},
+    selection::Selections,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -78,29 +79,15 @@ impl Database {
     }
 
     /// Handle the operation, using this database.
-    pub fn handle_operation(&mut self, operation: Operation) -> Result<(), MixError> {
-        match operation {
-            Operation::Install(packages) => {
-                package::install(&packages, self)?;
-            }
-            Operation::Remove(packages) => {
-                package::remove(&packages, self)?;
-            }
-            Operation::Synchronize => todo!(),
-            Operation::Update(packages) => {
-                let packages = match packages {
-                    Some(packages) => packages,
-                    None => self.iter().collect(),
-                };
-                package::update(&packages, self)?;
-            }
-            Operation::Fetch(packages) => {
-                let _client = reqwest::blocking::Client::new();
-                for _package in packages {
-                    todo!("Fetching is not yet implemented. This should download the PKGBUILD and sources.");
-                }
-            }
-        }
+    pub fn apply(&mut self, selections: Selections) -> Result<(), MixError> {
+        package::install(&selections.install, self)?;
+        package::remove(&selections.remove, self)?;
+        package::update(&selections.upgrade, self)?;
+        // TODO: Handle downgrades. For now, this is just warned on.
+        eprintln!(
+            "Not downgrading the following packages (Not yet implemented): {:?}",
+            &selections.downgrade
+        );
         Ok(())
     }
 
