@@ -1,9 +1,8 @@
 use anyhow::{anyhow, Context, Result};
 use indicatif::*;
-use mix::{database::Database, error::MixError, operation::Operation, package::Package, selection};
+use mix::{database::Database, error::MixError, selection::Selections};
+use std::{path::PathBuf, process};
 use structopt::StructOpt;
-
-use std::{cell::RefCell, path::PathBuf, process, rc::Rc};
 
 #[derive(Debug, StructOpt)]
 #[structopt()]
@@ -22,98 +21,6 @@ struct Options {
 
     #[structopt(subcommand)]
     command: SubCommands,
-}
-
-impl Options {
-    fn get_operation(&self, database: &mut Database) -> Result<Operation> {
-        Ok(match &self.command {
-            SubCommands::Install { targets } => {
-                let targets = selection::packages_from_names(
-                    &targets.iter().map(String::as_str).collect::<Vec<_>>()[..],
-                    database,
-                );
-                let targets = match targets {
-                    Ok(targets) => targets,
-                    Err((MixError::PackageNotFound(missing), mut found)) => {
-                        let mut truly_missing = vec![];
-                        for package_name in missing {
-                            match std::fs::File::open(&package_name) {
-                                Ok(file) => {
-                                    let mut package = Package::from_tarball(file)?;
-                                    package.local_path = Some(package_name.into());
-                                    found.push(Rc::new(RefCell::new(package)));
-                                }
-                                Err(error) => match error.kind() {
-                                    std::io::ErrorKind::NotFound => {
-                                        truly_missing.push(package_name);
-                                    }
-                                    _ => {
-                                        return Err(error)
-                                            .context("Failed to read package as file.")
-                                    }
-                                },
-                            }
-                        }
-                        if !truly_missing.is_empty() {
-                            return Err(anyhow!("Failed to find packages {:?}", truly_missing));
-                        }
-                        found
-                    }
-                    Err(err) => {
-                        return Err(anyhow!(
-                            "Unexpected error resolving package names: {:?}",
-                            err
-                        ))
-                    }
-                };
-                Operation::Install(targets)
-            }
-            SubCommands::Remove { targets } => {
-                let targets = selection::packages_from_names(
-                    &targets.iter().map(String::as_str).collect::<Vec<_>>()[..],
-                    database,
-                );
-                let targets = match targets {
-                    Ok(targets) => targets,
-                    Err((missing, _)) => {
-                        return Err(anyhow!("Failed to find packages {:?}", missing));
-                    }
-                };
-                Operation::Remove(targets)
-            }
-            SubCommands::Update { targets } => {
-                if targets.is_empty() {
-                    return Ok(Operation::Update(None));
-                }
-                let targets = selection::packages_from_names(
-                    &targets.iter().map(String::as_str).collect::<Vec<_>>()[..],
-                    database,
-                );
-                let targets = match targets {
-                    Ok(targets) => targets,
-                    Err((missing, _)) => {
-                        return Err(anyhow!("Failed to find packages {:?}", missing));
-                    }
-                };
-                Operation::Update(Some(targets))
-            }
-            SubCommands::Sync => Operation::Synchronize,
-            SubCommands::Fetch { targets } => {
-                let targets = selection::packages_from_names(
-                    &targets.iter().map(String::as_str).collect::<Vec<_>>()[..],
-                    database,
-                );
-                let targets = match targets {
-                    Ok(targets) => targets,
-                    Err((missing, _)) => {
-                        return Err(anyhow!("Failed to find packages {:?}", missing));
-                    }
-                };
-                Operation::Fetch(targets)
-            }
-            SubCommands::List => unreachable!("The list subcommand was not handled."),
-        })
-    }
 }
 
 #[derive(Debug, StructOpt)]
@@ -199,14 +106,59 @@ fn get_package_database(options: &Options) -> Database {
     }
 }
 
+/// Perform the subcommand if it does not require modifying the database, and
+/// get the needed changes if it does.
+fn process_subcommand(
+    subcommand: &SubCommands,
+    database: &Database,
+) -> Result<Option<Selections>, MixError> {
+    use SubCommands::*;
+    Ok(match subcommand {
+        Install { targets: _ } => todo!("Installing packages is not yet implemented."),
+        Remove { targets: _ } => todo!("Removing packages is not yet implemented."),
+        Update { targets: _ } => todo!("Updating packages is not yet implemented."),
+        SubCommands::Sync => todo!("Synchronizing with remote servers is not yet implemented."),
+        SubCommands::Fetch { targets: _ } => {
+            todo!("Fetching packages from remote servers is not yet implemented.")
+        }
+        SubCommands::List => {
+            for package in database.all_packages() {
+                let package = package;
+                println!("{}\t{}\t{}", package.name, package.version, package.state);
+            }
+            None
+        }
+    })
+}
+
 /// Ask the user to confirm if they wish to perform the action about to be executed.
-fn confirm_action(verb: &str, packages: &[Rc<RefCell<Package>>]) -> Result<bool> {
-    println!("This action will {} the following packages:", verb);
-    for package in packages {
-        println!("\t{}", package.borrow().name);
+fn confirm_action(selections: &Selections) -> Result<bool> {
+    if !selections.install.is_empty() {
+        println!("Packages to be installed:");
+        for package in &selections.install {
+            println!("\t{}", package.borrow().name);
+        }
+    }
+    if !selections.upgrade.is_empty() {
+        println!("Packages to be upgraded:");
+        for package in &selections.upgrade {
+            println!("\t{}", package.borrow().name);
+        }
+    }
+    if !selections.downgrade.is_empty() {
+        println!("Packages to be downgraded:");
+        for package in &selections.downgrade {
+            println!("\t{}", package.borrow().name);
+        }
+    }
+    if !selections.remove.is_empty() {
+        println!("Packages to be remove:");
+        for package in &selections.remove {
+            println!("\t{}", package.borrow().name);
+        }
     }
     dialoguer::Confirm::new()
-        .with_prompt(format!("Do you want to {} these packages?", verb))
+        .with_prompt("Do you want to apply these changes?")
         .interact()
         .context("Failed to display prompt!")
 }
@@ -223,52 +175,14 @@ fn enable_progress_bar(bar: &ProgressBar, verb: &str, packages_count: usize) {
 pub fn run() -> Result<()> {
     let options = Options::from_args();
     let mut database = get_package_database(&options);
-    // Handle this case early.
-    if let SubCommands::List = options.command {
-        for package in selection::all_packages(&database) {
-            let package = package.borrow();
-            println!("{}\t{}\t{}", package.name, package.version, package.state);
+    let selections = process_subcommand(&options.command, &database)?;
+    if let Some(selections) = selections {
+        //TODO: Add a progress bar back into the application.
+        if !confirm_action(&selections)? {
+            return Err(MixError::Aborted.into());
         }
-        return Ok(());
+        database.apply(selections)?;
     }
-    let operation = options.get_operation(&mut database)?;
-    let confirmation = match &operation {
-        Operation::Install(packages) => confirm_action("install", &packages)?,
-        Operation::Remove(packages) => confirm_action("remove", &packages)?,
-        Operation::Synchronize => true,
-        Operation::Update(packages) => confirm_action(
-            "update",
-            &match packages {
-                Some(packages) => packages.clone(),
-                None => vec![],
-            },
-        )?,
-        Operation::Fetch(_) => true,
-    };
-    if !confirmation {
-        return Err(MixError::Aborted.into());
-    }
-    let bar = ProgressBar::new(0).with_style(
-        ProgressStyle::default_spinner()
-            .template("{spinner} {pos}/{len} {prefix} {msg} {percent}% {wide_bar} {eta}"),
-    );
-    match &operation {
-        Operation::Install(packages) => enable_progress_bar(&bar, "Installing", packages.len()),
-        Operation::Remove(packages) => enable_progress_bar(&bar, "Removing", packages.len()),
-        Operation::Synchronize => {}
-        Operation::Update(packages) => match packages {
-            Some(packages) => enable_progress_bar(&bar, "Updating", packages.len()),
-            None => enable_progress_bar(&bar, "Updating everything", 0),
-        },
-        Operation::Fetch(packages) => enable_progress_bar(&bar, "Fetching", packages.len()),
-    }
-    // BUG/TODO: The progress bar obscures output. This can't be solved until
-    // progress reporting is better implemented, so it's being left for now.
-    bar.finish_and_clear();
-    todo!("Rewrite the operation handling.");
-    bar.set_style(ProgressStyle::default_spinner().template("Finished in {elapsed}."));
-    bar.disable_steady_tick();
-    bar.finish();
     database
         .save(&options.database)
         .context("Failed to save database.")?;

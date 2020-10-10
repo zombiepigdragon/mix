@@ -1,8 +1,7 @@
 use crate::{
     error::MixError,
-    operation::Operation,
     package::{self, Package},
-    selection::Selections,
+    Selections,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -98,5 +97,17 @@ impl Database {
             return Ok(File::open(filename)?);
         }
         todo!()
+    }
+
+    /// Provide a way to iterate over all packages.
+    /// # Todo:
+    /// This is not an ideal way to handle it, but this commit is large enough
+    /// that I'm going to use the path of least resistance. This should ideally
+    /// iterate over immutable references.
+    pub fn all_packages(&self) -> Vec<Package> {
+        self.packages
+            .iter()
+            .map(|package| package.borrow().clone())
+            .collect()
     }
 }

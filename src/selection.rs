@@ -103,8 +103,3 @@ pub fn remove(
 ) -> Result<Selections, (MixError, Vec<Rc<RefCell<Package>>>)> {
     todo!()
 }
-
-/// Gets every package in the database.
-pub fn all_packages(database: &Database) -> Vec<Rc<RefCell<Package>>> {
-    database.iter().collect()
-}

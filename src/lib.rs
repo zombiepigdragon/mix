@@ -63,8 +63,6 @@
 pub mod database;
 /// Errors that can be raised by the package manager.
 pub mod error;
-/// The operations that can be performed, such as installing or removing packages.
-pub mod operation;
 /// The packages database and structures.
 pub mod package;
 /// Selecting packages from the database for operations.
@@ -72,6 +70,5 @@ pub mod selection;
 
 pub use database::Database;
 pub use error::MixError as Error;
-pub use operation::Operation;
 pub use package::{InstallState, Package, Version};
-pub use selection::{all_packages, package_from_name, packages_from_names};
+pub use selection::{package_from_name, packages_from_names, Selections};
