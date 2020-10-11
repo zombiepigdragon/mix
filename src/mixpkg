@@ -1,4 +1,4 @@
-#!/usr/bin/bash
+#!/usr/bin/env bash
 # Make the environment programmer friendly
 set -o errexit -o pipefail -o noclobber -o nounset
 
