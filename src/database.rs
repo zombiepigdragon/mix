@@ -1,40 +1,34 @@
 use crate::{
-    error::MixError,
-    package::{self, Package},
-    Selections,
+    package::{self, Package, RcRefCellPackage},
+    Error, Selections,
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    cell::RefCell,
     fs::File,
     path::{Path, PathBuf},
-    rc::Rc,
 };
 
 /// The package database. It provides all actions needed to manage packages.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Database {
-    packages: Vec<Rc<RefCell<Package>>>,
+    packages: Vec<RcRefCellPackage>,
     #[serde(skip)]
     package_cache: PathBuf,
 }
 
 impl Database {
     /// Given the name of a package, provide the package itself.
-    pub(crate) fn get_package(
-        &self,
-        package_name: &impl AsRef<str>,
-    ) -> Option<Rc<RefCell<Package>>> {
+    pub(crate) fn get_package(&self, package_name: &impl AsRef<str>) -> Option<RcRefCellPackage> {
         self.iter()
             .find(|package| package.borrow().name == package_name.as_ref())
     }
     /// Provide an iterator over the values of the database.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = Rc<RefCell<Package>>> + '_ {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = RcRefCellPackage> + '_ {
         self.packages.iter().cloned()
     }
 
     /// Add the given package to the database.
-    pub(crate) fn import_package(&mut self, package: Rc<RefCell<Package>>) -> Result<(), MixError> {
+    pub(crate) fn import_package(&mut self, package: RcRefCellPackage) -> crate::Result<()> {
         if self.packages.contains(&package) {
             return Ok(());
         }
@@ -50,21 +44,21 @@ impl Database {
     }
 
     /// Load the package database from disk.
-    pub fn load(path: impl AsRef<Path>) -> Result<Self, MixError> {
+    pub fn load(path: impl AsRef<Path>) -> crate::Result<Self> {
         let file = match File::open(&path) {
             Ok(file) => file,
             Err(err) => match err.kind() {
                 std::io::ErrorKind::NotFound => {
-                    return Err(MixError::FileNotFound(path.as_ref().to_owned()))
+                    return Err(Error::FileNotFound(path.as_ref().to_owned()))
                 }
-                _ => return Err(MixError::IOError(err)),
+                _ => return Err(Error::IOError(err)),
             },
         };
         Ok(serde_cbor::from_reader(file)?)
     }
 
     /// Save the current package database to the disk.
-    pub fn save(&self, path: &Path) -> Result<(), MixError> {
+    pub fn save(&self, path: &Path) -> crate::Result<()> {
         let file = File::create(path)?;
         Ok(serde_cbor::to_writer(file, self)?)
     }
@@ -78,7 +72,7 @@ impl Database {
     }
 
     /// Handle the operation, using this database.
-    pub fn apply(&mut self, selections: Selections) -> Result<(), MixError> {
+    pub fn apply(&mut self, selections: Selections) -> crate::Result<()> {
         package::install(&selections.install, self)?;
         package::remove(&selections.remove, self)?;
         package::update(&selections.upgrade, self)?;
@@ -91,7 +85,7 @@ impl Database {
     }
 
     /// Get the path of the package within the package cache.
-    pub fn open_package_tarball(&self, package: &Package) -> Result<impl std::io::Read, MixError> {
+    pub fn open_package_tarball(&self, package: &Package) -> crate::Result<impl std::io::Read> {
         let filename = self.package_cache.join(package.get_filename());
         if filename.exists() {
             return Ok(File::open(filename)?);

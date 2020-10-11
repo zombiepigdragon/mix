@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use indicatif::*;
-use mix::{database::Database, error::MixError, selection::Selections};
+use mix::{Database, Error as MixError, Selections};
 use std::{path::PathBuf, process};
 use structopt::StructOpt;
 

@@ -1,4 +1,4 @@
-use crate::{database::Database, error::MixError};
+use crate::{Database, Error};
 use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
@@ -14,10 +14,14 @@ use std::{
 use tar::Archive;
 use xz2::read::XzDecoder;
 
+/// An Rc<RefCell<Package>>. Exists to silence a Clippy warning.
+/// It may not be needed to use a Rc and/or RefCell in the future.
+pub(crate) type RcRefCellPackage = Rc<RefCell<Package>>;
+
 /// Install the given packages. This will place files onto the filesystem, and
 /// mark the packages as installed (either as a dependency if not installed, or
 /// leaving the state as dependency or manually installed.)
-pub fn install(packages: &[Rc<RefCell<Package>>], database: &mut Database) -> Result<(), MixError> {
+pub fn install(packages: &[RcRefCellPackage], database: &mut Database) -> crate::Result<()> {
     for package in packages {
         // Make sure the package is known.
         database.import_package(package.clone())?;
@@ -48,7 +52,7 @@ pub fn install(packages: &[Rc<RefCell<Package>>], database: &mut Database) -> Re
 /// # Warning
 /// A call to this function that removes dependencies of installed packages but
 /// not those packages will place the package database into an an unsafe state.
-pub fn remove(packages: &[Rc<RefCell<Package>>], database: &mut Database) -> Result<(), MixError> {
+pub fn remove(packages: &[RcRefCellPackage], database: &mut Database) -> crate::Result<()> {
     for package in packages {
         package.borrow_mut().state = InstallState::Uninstalled;
         let file = database.open_package_tarball(&package.borrow())?;
@@ -86,7 +90,7 @@ pub fn remove(packages: &[Rc<RefCell<Package>>], database: &mut Database) -> Res
 
 /// Update the given packages to the latest version. This may skip over packages
 /// that are already up to date.
-pub fn update(packages: &[Rc<RefCell<Package>>], _database: &mut Database) -> Result<(), MixError> {
+pub fn update(packages: &[RcRefCellPackage], _database: &mut Database) -> crate::Result<()> {
     for _package in packages {
         todo!()
     }
@@ -94,7 +98,7 @@ pub fn update(packages: &[Rc<RefCell<Package>>], _database: &mut Database) -> Re
 }
 
 /// Download the files of the given package.
-pub fn fetch(_package: Rc<RefCell<Package>>) -> Result<(), MixError> {
+pub fn fetch(_package: RcRefCellPackage) -> crate::Result<()> {
     todo!()
 }
 
@@ -116,7 +120,7 @@ pub struct Package {
 
 impl Package {
     /// Provide a package from a tarball
-    pub fn from_tarball(file: impl Read) -> Result<Self, MixError> {
+    pub fn from_tarball(file: impl Read) -> crate::Result<Self> {
         let file = XzDecoder::new(file);
         let mut archive = Archive::new(file);
         let mut files = vec![];
@@ -133,17 +137,17 @@ impl Package {
         }
         let manifest = match manifest {
             Some(manifest) => manifest,
-            None => return Err(MixError::InvalidPackageError),
+            None => return Err(Error::InvalidPackageError),
         };
         let metadata = match manifest {
             Ok(toml::Value::Table(metadata)) => metadata,
-            Ok(value) => return Err(MixError::InvalidManifestError(value)),
-            Err(error) => return Err(MixError::ManifestParseError(error)),
+            Ok(value) => return Err(Error::InvalidManifestError(value)),
+            Err(error) => return Err(Error::ManifestParseError(error)),
         };
         let name = if let toml::Value::String(name) = metadata["name"].clone() {
             name
         } else {
-            return Err(MixError::InvalidManifestError(metadata["name"].clone()));
+            return Err(Error::InvalidManifestError(metadata["name"].clone()));
         };
         // TODO: Read a version out of the file.
         let version = Version::Unknown;
@@ -290,7 +294,7 @@ impl std::fmt::Display for Version {
 /// opting for support of creating them instead. This will handle placing files
 /// on disk, as well as ensuring permissions work out. If there's a way to do
 /// this transparently through tar, feel free to open a PR with this replaced.
-fn place_entry(entry: &mut tar::Entry<impl Read>) -> Result<(), MixError> {
+fn place_entry(entry: &mut tar::Entry<impl Read>) -> crate::Result<()> {
     let path = PathBuf::from("/").join(entry.path()?);
     match entry.header().entry_type() {
         tar::EntryType::Directory => {

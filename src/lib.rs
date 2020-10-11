@@ -69,6 +69,6 @@ pub mod package;
 pub mod selection;
 
 pub use database::Database;
-pub use error::MixError as Error;
+pub use error::{MixError as Error, Result};
 pub use package::{InstallState, Package, Version};
-pub use selection::{package_from_name, packages_from_names, Selections};
+pub use selection::{install, package_from_name, packages_from_names, remove, Selections};

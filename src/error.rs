@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 use thiserror::Error;
 
+/// A [Result](std::result::Result) type for Mix.
+pub type Result<T> = std::result::Result<T, MixError>;
+
 /// Errors that can be produced by mix.
 #[derive(Debug, Error)]
 pub enum MixError {
